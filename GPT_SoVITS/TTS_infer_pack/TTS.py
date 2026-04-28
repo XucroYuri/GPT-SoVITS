@@ -1,6 +1,7 @@
 import gc
 import math
 import os
+from pathlib import Path
 import random
 import sys
 import time
@@ -10,9 +11,14 @@ from copy import deepcopy
 import torchaudio
 from tqdm import tqdm
 
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 now_dir = os.getcwd()
 sys.path.append(now_dir)
-import os
+from model_store import apply_project_runtime_env, bigvgan_model_dir, v4_vocoder_path
+apply_project_runtime_env()
 from typing import List, Tuple, Union
 
 import ffmpeg
@@ -622,7 +628,7 @@ class TTS:
                 self.empty_cache()
 
             self.vocoder = BigVGAN.from_pretrained(
-                "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,),
+                str(bigvgan_model_dir()),
                 use_cuda_kernel=False,
             )  # if True, RuntimeError: Ninja is required to load C++ extensions
             # remove weight norm in the model and set to eval mode
@@ -655,7 +661,7 @@ class TTS:
             )
             self.vocoder.remove_weight_norm()
             state_dict_g = torch.load(
-                "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,),
+                str(v4_vocoder_path()),
                 map_location="cpu",
                 weights_only=False,
             )

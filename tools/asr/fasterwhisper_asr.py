@@ -9,9 +9,11 @@ from huggingface_hub import snapshot_download as snapshot_download_hf
 from modelscope import snapshot_download as snapshot_download_ms
 from tqdm import tqdm
 
+from model_store import apply_project_runtime_env, asr_model_path, resolve_hf_endpoint
 from tools.asr.config import get_models
 from tools.asr.funasr_asr import only_asr
 from tools.my_utils import load_cudnn
+apply_project_runtime_env()
 
 # fmt: off
 language_code_list = [
@@ -48,24 +50,25 @@ def download_model(model_size: str):
         source = "ModelScope"
 
     model_path = ""
+    asr_models_root = asr_model_path()
     if source == "HF":
         if "distil" in model_size:
             if "3.5" in model_size:
                 repo_id = "distil-whisper/distil-large-v3.5-ct2"
-                model_path = "tools/asr/models/faster-distil-whisper-large-v3.5"
+                model_path = str(asr_models_root / "faster-distil-whisper-large-v3.5")
             else:
                 repo_id = "Systran/faster-{}-whisper-{}".format(*model_size.split("-", maxsplit=1))
         elif model_size == "large-v3-turbo":
             repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
-            model_path = "tools/asr/models/faster-whisper-large-v3-turbo"
+            model_path = str(asr_models_root / "faster-whisper-large-v3-turbo")
         else:
             repo_id = f"Systran/faster-whisper-{model_size}"
         model_path = (
-            model_path or f"tools/asr/models/{repo_id.replace('Systran/', '').replace('distil-whisper/', '', 1)}"
+            model_path or str(asr_models_root / repo_id.replace("Systran/", "").replace("distil-whisper/", "", 1))
         )
     else:
         repo_id = "XXXXRT/faster-whisper"
-        model_path = "tools/asr/models"
+        model_path = str(asr_models_root)
 
     files: list[str] = [
         "config.json",
@@ -89,6 +92,7 @@ def download_model(model_size: str):
             local_dir=model_path,
             local_dir_use_symlinks=False,
             allow_patterns=files,
+            endpoint=resolve_hf_endpoint(),
         )
     else:
         print(f"Downloading model from ModelScope: {repo_id} to {model_path}")

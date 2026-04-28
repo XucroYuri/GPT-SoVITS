@@ -4,6 +4,8 @@ import sys
 os.environ["version"] = version = "v2Pro"
 now_dir = os.getcwd()
 sys.path.insert(0, now_dir)
+from model_store import apply_project_runtime_env, pretrained_model_path
+apply_project_runtime_env()
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -169,8 +171,8 @@ def check_pretrained_is_exist(version):
         pretrained_sovits_name[version],
         pretrained_sovits_name[version].replace("s2G", "s2D"),
         pretrained_gpt_name[version],
-        "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
-        "GPT_SoVITS/pretrained_models/chinese-hubert-base",
+        str(pretrained_model_path("chinese-roberta-wwm-ext-large")),
+        str(pretrained_model_path("chinese-hubert-base")),
     )
     _ = ""
     for i in pretrained_model_list:
@@ -862,7 +864,7 @@ def close1a():
     )
 
 
-sv_path = "GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt"
+sv_path = str(pretrained_model_path("sv", "pretrained_eres2netv2w24s4ep4.ckpt"))
 ps1b = []
 process_name_1b = i18n("语音自监督特征提取")
 
@@ -1558,7 +1560,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         with gr.Row():
                             bert_pretrained_dir = gr.Textbox(
                                 label=i18n("预训练中文BERT模型路径"),
-                                value="GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
+                                value=str(pretrained_model_path("chinese-roberta-wwm-ext-large")),
                                 interactive=False,
                                 lines=2,
                             )
@@ -1583,7 +1585,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         with gr.Row():
                             cnhubert_base_dir = gr.Textbox(
                                 label=i18n("预训练SSL模型路径"),
-                                value="GPT_SoVITS/pretrained_models/chinese-hubert-base",
+                                value=str(pretrained_model_path("chinese-hubert-base")),
                                 interactive=False,
                                 lines=2,
                             )

@@ -193,3 +193,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Project-local model artifacts and caches
+GPT_SoVITS/pretrained_models/
+tools/asr/models/
+model_store.py

@@ -90,6 +90,25 @@ conda activate GPTSoVits
 bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
 ```
 
+### Project-local model and cache paths
+
+By default, GPT-SoVITS keeps its pretrained assets inside the project workspace instead of relying on machine-global Hugging Face caches.
+
+- pretrained models: `GPT_SoVITS/pretrained_models`
+- ASR models: `tools/asr/models`
+- runtime cache: `.cache/`
+
+Optional project-scoped overrides:
+
+```bash
+export GPT_SOVITS_PRETRAINED_MODELS_DIR=/path/to/pretrained_models
+export GPT_SOVITS_ASR_MODELS_DIR=/path/to/asr_models
+export GPT_SOVITS_CACHE_ROOT=/path/to/project_cache
+export GPT_SOVITS_HF_ENDPOINT=https://hf-mirror.com
+```
+
+These overrides are preferred over putting `HF_ENDPOINT`, `HF_HOME`, or `TRANSFORMERS_CACHE` into your global shell profile.
+
 ### macOS
 
 **Note: The models trained with GPUs on Macs result in significantly lower quality compared to those trained on other devices, so we are temporarily using CPUs instead.**

@@ -23,14 +23,20 @@ set_high_priority()
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import sys
 import traceback
 import warnings
 
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import torch
 import torchaudio
 from text.LangSegmenter import LangSegmenter
+from model_store import apply_project_runtime_env, bigvgan_model_dir, pretrained_model_path, v4_vocoder_path
 
 logging.getLogger("markdown_it").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -43,6 +49,7 @@ logging.getLogger("multipart.multipart").setLevel(logging.ERROR)
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 version = model_version = os.environ.get("version", "v2")
+apply_project_runtime_env()
 
 from config import change_choices, get_weights_names, name2gpt_path, name2sovits_path
 
@@ -79,8 +86,8 @@ with open("./weight.json", "r", encoding="utf-8") as file:
 # print(version)###GPT version里没有s2的v2pro
 # print(weight_data.get("GPT", {}).get(version, GPT_names[-1]))
 
-cnhubert_base_path = os.environ.get("cnhubert_base_path", "GPT_SoVITS/pretrained_models/chinese-hubert-base")
-bert_path = os.environ.get("bert_path", "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large")
+cnhubert_base_path = os.environ.get("cnhubert_base_path", str(pretrained_model_path("chinese-hubert-base")))
+bert_path = os.environ.get("bert_path", str(pretrained_model_path("chinese-roberta-wwm-ext-large")))
 infer_ttswebui = os.environ.get("infer_ttswebui", 9872)
 infer_ttswebui = int(infer_ttswebui)
 is_share = os.environ.get("is_share", "False")
@@ -437,7 +444,6 @@ def change_gpt_weights(gpt_path):
 
 
 change_gpt_weights(gpt_path)
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import torch
 
 now_dir = os.getcwd()
@@ -481,7 +487,7 @@ def init_bigvgan():
     from BigVGAN import bigvgan
 
     bigvgan_model = bigvgan.BigVGAN.from_pretrained(
-        "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,),
+        str(bigvgan_model_dir()),
         use_cuda_kernel=False,
     )  # if True, RuntimeError: Ninja is required to load C++ extensions
     # remove weight norm in the model and set to eval mode
@@ -511,7 +517,7 @@ def init_hifigan():
     hifigan_model.eval()
     hifigan_model.remove_weight_norm()
     state_dict_g = torch.load(
-        "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,),
+        str(v4_vocoder_path()),
         map_location="cpu",
         weights_only=False,
     )

@@ -148,6 +148,8 @@ import sys
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 sys.path.append("%s/GPT_SoVITS" % (now_dir))
+from model_store import apply_project_runtime_env, bigvgan_model_dir, v4_vocoder_path
+apply_project_runtime_env()
 
 import signal
 from text.LangSegmenter import LangSegmenter
@@ -239,7 +241,7 @@ def init_bigvgan():
     from BigVGAN import bigvgan
 
     bigvgan_model = bigvgan.BigVGAN.from_pretrained(
-        "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,),
+        str(bigvgan_model_dir()),
         use_cuda_kernel=False,
     )  # if True, RuntimeError: Ninja is required to load C++ extensions
     # remove weight norm in the model and set to eval mode
@@ -268,7 +270,7 @@ def init_hifigan():
     hifigan_model.eval()
     hifigan_model.remove_weight_norm()
     state_dict_g = torch.load(
-        "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,),
+        str(v4_vocoder_path()),
         map_location="cpu",
         weights_only=False,
     )
