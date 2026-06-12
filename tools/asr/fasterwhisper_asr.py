@@ -2,18 +2,14 @@ import argparse
 import os
 import traceback
 
-import requests
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import torch
 from faster_whisper import WhisperModel
-from huggingface_hub import snapshot_download as snapshot_download_hf
-from modelscope import snapshot_download as snapshot_download_ms
 from tqdm import tqdm
 
-from model_store import apply_project_runtime_env, asr_model_path, resolve_hf_endpoint
-from tools.asr.config import get_models
-from tools.asr.funasr_asr import only_asr
-from tools.my_utils import load_cudnn
-apply_project_runtime_env()
+from tools.asr.config import check_fw_local_models
 
 # fmt: off
 language_code_list = [
@@ -41,76 +37,20 @@ language_code_list = [
 # fmt: on
 
 
-def download_model(model_size: str):
-    url = "https://huggingface.co/api/models/gpt2"
-    try:
-        requests.get(url, timeout=3)
-        source = "HF"
-    except Exception:
-        source = "ModelScope"
-
-    model_path = ""
-    asr_models_root = asr_model_path()
-    if source == "HF":
-        if "distil" in model_size:
-            if "3.5" in model_size:
-                repo_id = "distil-whisper/distil-large-v3.5-ct2"
-                model_path = str(asr_models_root / "faster-distil-whisper-large-v3.5")
-            else:
-                repo_id = "Systran/faster-{}-whisper-{}".format(*model_size.split("-", maxsplit=1))
-        elif model_size == "large-v3-turbo":
-            repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
-            model_path = str(asr_models_root / "faster-whisper-large-v3-turbo")
-        else:
-            repo_id = f"Systran/faster-whisper-{model_size}"
-        model_path = (
-            model_path or str(asr_models_root / repo_id.replace("Systran/", "").replace("distil-whisper/", "", 1))
-        )
+def execute_asr(input_folder, output_folder, model_size, language, precision):
+    if "-local" in model_size:
+        model_size = model_size[:-6]
+        model_path = f"tools/asr/models/faster-whisper-{model_size}"
     else:
-        repo_id = "XXXXRT/faster-whisper"
-        model_path = str(asr_models_root)
-
-    files: list[str] = [
-        "config.json",
-        "model.bin",
-        "tokenizer.json",
-        "vocabulary.txt",
-    ]
-    if "large-v3" in model_size or "distil" in model_size:
-        files.append("preprocessor_config.json")
-        files.append("vocabulary.json")
-
-        files.remove("vocabulary.txt")
-
-    if source == "ModelScope":
-        files = [f"faster-whisper-{model_size}/{file}".replace("whisper-distil", "distil-whisper") for file in files]
-
-    if source == "HF":
-        print(f"Downloading model from HuggingFace: {repo_id} to {model_path}")
-        snapshot_download_hf(
-            repo_id,
-            local_dir=model_path,
-            local_dir_use_symlinks=False,
-            allow_patterns=files,
-            endpoint=resolve_hf_endpoint(),
-        )
-    else:
-        print(f"Downloading model from ModelScope: {repo_id} to {model_path}")
-        snapshot_download_ms(
-            repo_id,
-            local_dir=model_path,
-            allow_patterns=files,
-        )
-        return model_path + f"/faster-whisper-{model_size}".replace("whisper-distil", "distil-whisper")
-    return model_path
-
-
-def execute_asr(input_folder, output_folder, model_path, language, precision):
+        model_path = model_size
     if language == "auto":
         language = None  # 不设置语种由模型自动输出概率最高的语种
-    print("loading faster whisper model:", model_path, model_path)
+    print("loading faster whisper model:", model_size, model_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = WhisperModel(model_path, device=device, compute_type=precision)
+    try:
+        model = WhisperModel(model_path, device=device, compute_type=precision)
+    except:
+        return print(traceback.format_exc())
 
     input_file_names = os.listdir(input_folder)
     input_file_names.sort()
@@ -130,17 +70,18 @@ def execute_asr(input_folder, output_folder, model_path, language, precision):
             )
             text = ""
 
-            if info.language in ["zh", "yue"]:
+            if info.language == "zh":
                 print("检测为中文文本, 转 FunASR 处理")
+                if "only_asr" not in globals():
+                    from tools.asr.funasr_asr import only_asr  # 如果用英文就不需要导入下载模型
                 text = only_asr(file_path, language=info.language.lower())
 
             if text == "":
                 for segment in segments:
                     text += segment.text
             output.append(f"{file_path}|{output_file_name}|{info.language.upper()}|{text}")
-        except Exception as e:
-            print(e)
-            traceback.print_exc()
+        except:
+            print(traceback.format_exc())
 
     output_folder = output_folder or "output/asr_opt"
     os.makedirs(output_folder, exist_ok=True)
@@ -151,8 +92,6 @@ def execute_asr(input_folder, output_folder, model_path, language, precision):
         print(f"ASR 任务完成->标注文件路径: {output_file_path}\n")
     return output_file_path
 
-
-load_cudnn()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -165,7 +104,7 @@ if __name__ == "__main__":
         "--model_size",
         type=str,
         default="large-v3",
-        choices=get_models(),
+        choices=check_fw_local_models(),
         help="Model Size of Faster Whisper",
     )
     parser.add_argument(
@@ -181,14 +120,10 @@ if __name__ == "__main__":
     )
 
     cmd = parser.parse_args()
-    model_size = cmd.model_size
-    if model_size == "large":
-        model_size = "large-v3"
-    model_path = download_model(model_size)
     output_file_path = execute_asr(
         input_folder=cmd.input_folder,
         output_folder=cmd.output_folder,
-        model_path=model_path,
+        model_size=cmd.model_size,
         language=cmd.language,
         precision=cmd.precision,
     )

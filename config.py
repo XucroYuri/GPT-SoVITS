@@ -2,46 +2,48 @@ import os
 import re
 import sys
 
+from tools.startup_bootstrap import apply_startup_patches
+
+apply_startup_patches()
+
 import torch
-from model_store import apply_project_runtime_env, pretrained_model_path
 
 from tools.i18n.i18n import I18nAuto
 
 i18n = I18nAuto(language=os.environ.get("language", "Auto"))
-apply_project_runtime_env()
 
 
 pretrained_sovits_name = {
-    "v1": str(pretrained_model_path("s2G488k.pth")),
-    "v2": str(pretrained_model_path("gsv-v2final-pretrained", "s2G2333k.pth")),
-    "v3": str(pretrained_model_path("s2Gv3.pth")),  ###v3v4还要检查vocoder，算了。。。
-    "v4": str(pretrained_model_path("gsv-v4-pretrained", "s2Gv4.pth")),
-    "v2Pro": str(pretrained_model_path("v2Pro", "s2Gv2Pro.pth")),
-    "v2ProPlus": str(pretrained_model_path("v2Pro", "s2Gv2ProPlus.pth")),
+    "v1": "GPT_SoVITS/pretrained_models/s2G488k.pth",
+    "v2": "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
+    "v3": "GPT_SoVITS/pretrained_models/s2Gv3.pth",  ###v3v4还要检查vocoder，算了。。。
+    "v4": "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
+    "v2Pro": "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth",
+    "v2ProPlus": "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth",
 }
 
 pretrained_gpt_name = {
-    "v1": str(pretrained_model_path("s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt")),
-    "v2": str(pretrained_model_path("gsv-v2final-pretrained", "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")),
-    "v3": str(pretrained_model_path("s1v3.ckpt")),
-    "v4": str(pretrained_model_path("s1v3.ckpt")),
-    "v2Pro": str(pretrained_model_path("s1v3.ckpt")),
-    "v2ProPlus": str(pretrained_model_path("s1v3.ckpt")),
+    "v1": "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
+    "v2": "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+    "v3": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+    "v4": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+    "v2Pro": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
+    "v2ProPlus": "GPT_SoVITS/pretrained_models/s1v3.ckpt",
 }
 name2sovits_path = {
     # i18n("不训练直接推v1底模！"): "GPT_SoVITS/pretrained_models/s2G488k.pth",
-    i18n("不训练直接推v2底模！"): str(pretrained_model_path("gsv-v2final-pretrained", "s2G2333k.pth")),
+    i18n("不训练直接推v2底模！"): "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth",
     # i18n("不训练直接推v3底模！"): "GPT_SoVITS/pretrained_models/s2Gv3.pth",
     # i18n("不训练直接推v4底模！"): "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
-    i18n("不训练直接推v2Pro底模！"): str(pretrained_model_path("v2Pro", "s2Gv2Pro.pth")),
-    i18n("不训练直接推v2ProPlus底模！"): str(pretrained_model_path("v2Pro", "s2Gv2ProPlus.pth")),
+    i18n("不训练直接推v2Pro底模！"): "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth",
+    i18n("不训练直接推v2ProPlus底模！"): "GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth",
 }
 name2gpt_path = {
     # i18n("不训练直接推v1底模！"):"GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
     i18n(
         "不训练直接推v2底模！"
-    ): str(pretrained_model_path("gsv-v2final-pretrained", "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")),
-    i18n("不训练直接推v3底模！"): str(pretrained_model_path("s1v3.ckpt")),
+    ): "GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+    i18n("不训练直接推v3底模！"): "GPT_SoVITS/pretrained_models/s1v3.ckpt",
 }
 SoVITS_weight_root = [
     "SoVITS_weights",
@@ -79,7 +81,7 @@ GPT_weight_version2root = {
 
 def custom_sort_key(s):
     # 使用正则表达式提取字符串中的数字部分和非数字部分
-    parts = re.split("(\d+)", s)
+    parts = re.split(r"(\d+)", s)
     # 将数字部分转换为整数，非数字部分保持不变
     parts = [int(part) if part.isdigit() else part for part in parts]
     return parts
@@ -131,10 +133,10 @@ is_half = True if is_half_str.lower() == "true" else False
 is_share_str = os.environ.get("is_share", "False")
 is_share = True if is_share_str.lower() == "true" else False
 
-cnhubert_path = str(pretrained_model_path("chinese-hubert-base"))
-bert_path = str(pretrained_model_path("chinese-roberta-wwm-ext-large"))
-pretrained_sovits_path = str(pretrained_model_path("s2G488k.pth"))
-pretrained_gpt_path = str(pretrained_model_path("s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"))
+cnhubert_path = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
+bert_path = "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"
+pretrained_sovits_path = "GPT_SoVITS/pretrained_models/s2G488k.pth"
+pretrained_gpt_path = "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"
 
 exp_root = "logs"
 python_exec = sys.executable or "python"
@@ -146,8 +148,7 @@ webui_port_subfix = 9871
 
 api_port = 9880
 
-
-# Thanks to the contribution of @Karasukaigan and @XXXXRT666
+#Thanks to the contribution of @Karasukaigan and @XXXXRT666
 def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, float]:
     cpu = torch.device("cpu")
     cuda = torch.device(f"cuda:{idx}")
@@ -160,13 +161,10 @@ def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, flo
     mem_gb = mem_bytes / (1024**3) + 0.4
     major, minor = capability
     sm_version = major + minor / 10.0
-    is_16_series = bool(re.search(r"16\d{2}", name)) and sm_version == 7.5
-    if mem_gb < 4 or sm_version < 5.3:
-        return cpu, torch.float32, 0.0, 0.0
-    if sm_version == 6.1 or is_16_series == True:
-        return cuda, torch.float32, sm_version, mem_gb
-    if sm_version > 6.1:
-        return cuda, torch.float16, sm_version, mem_gb
+    is_16_series = bool(re.search(r"16\d{2}", name))and sm_version == 7.5
+    if mem_gb < 4 or sm_version < 5.3:return cpu, torch.float32, 0.0, 0.0
+    if sm_version == 6.1 or is_16_series==True:return cuda, torch.float32, sm_version, mem_gb
+    if sm_version > 6.1:return cuda, torch.float16, sm_version, mem_gb
     return cpu, torch.float32, 0.0, 0.0
 
 

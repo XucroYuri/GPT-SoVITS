@@ -104,15 +104,15 @@ if os.path.exists(semantic_path) == False:
 
     lines1 = []
     for line in lines[int(i_part) :: int(all_parts)]:
-        # print(line)
         try:
-            # wav_name,text=line.split("\t")
-            wav_name, spk_name, language, text = line.split("|")
+            parts = line.split("|")
+            if len(parts) < 4:
+                raise ValueError("list行列数不足，需至少4列：wav_path|speaker_name|language|text")
+            wav_name = parts[0]
             wav_name = clean_path(wav_name)
             wav_name = os.path.basename(wav_name)
-            # name2go(name,lines1)
             name2go(wav_name, lines1)
-        except:
+        except Exception:
             print(line, traceback.format_exc())
     with open(semantic_path, "w", encoding="utf8") as f:
         f.write("\n".join(lines1))

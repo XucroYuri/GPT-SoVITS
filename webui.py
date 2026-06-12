@@ -1,11 +1,13 @@
 import os
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
 import sys
 
-os.environ["version"] = version = "v2Pro"
+os.environ["version"] = version = "v2ProPlus"
 now_dir = os.getcwd()
 sys.path.insert(0, now_dir)
-from model_store import apply_project_runtime_env, pretrained_model_path
-apply_project_runtime_env()
+from tools.startup_bootstrap import apply_startup_patches
+
+apply_startup_patches()
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -42,7 +44,7 @@ for path in site.getsitepackages():
     if "packages" in path:
         site_packages_roots.append(path)
 if site_packages_roots == []:
-    site_packages_roots = ["%s/runtime/Lib/site-packages" % now_dir]
+    site_packages_roots = ["%s/py312/Lib/site-packages" % now_dir]
 # os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["no_proxy"] = "localhost, 127.0.0.1, ::1"
 os.environ["all_proxy"] = ""
@@ -88,9 +90,13 @@ from config import (
 from tools import my_utils
 from tools.my_utils import check_details, check_for_existance
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
 # os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1' # 当遇到mps不支持的步骤时使用cpu
+try:
+    import gradio.analytics as analytics
+
+    analytics.version_check = lambda: None
+except:
+    ...
 import gradio as gr
 
 n_cpu = cpu_count()
@@ -118,8 +124,8 @@ def set_default():
     gpu_info = "\n".join(gpu_infos)
     if is_gpu_ok:
         minmem = min(mem)
-        default_batch_size = int(minmem // 2 if version not in v3v4set else minmem // 8)
-        default_batch_size_s1 = int(minmem // 2)
+        default_batch_size = minmem // 2 if version not in v3v4set else minmem // 8
+        default_batch_size_s1 = minmem // 2
     else:
         default_batch_size = default_batch_size_s1 = int(psutil.virtual_memory().total / 1024 / 1024 / 1024 / 4)
     if version not in v3v4set:
@@ -171,8 +177,8 @@ def check_pretrained_is_exist(version):
         pretrained_sovits_name[version],
         pretrained_sovits_name[version].replace("s2G", "s2D"),
         pretrained_gpt_name[version],
-        str(pretrained_model_path("chinese-roberta-wwm-ext-large")),
-        str(pretrained_model_path("chinese-hubert-base")),
+        "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
+        "GPT_SoVITS/pretrained_models/chinese-hubert-base",
     )
     _ = ""
     for i in pretrained_model_list:
@@ -332,7 +338,8 @@ process_name_tts = i18n("TTS推理WebUI")
 
 def change_tts_inference(bert_path, cnhubert_base_path, gpu_number, gpt_path, sovits_path, batched_infer_enabled):
     global p_tts_inference
-    if batched_infer_enabled:
+    fast_script = os.path.join(now_dir, "GPT_SoVITS", "inference_webui_fast.py")
+    if batched_infer_enabled and os.path.exists(fast_script):
         cmd = '"%s" -s GPT_SoVITS/inference_webui_fast.py "%s"' % (python_exec, language)
     else:
         cmd = '"%s" -s GPT_SoVITS/inference_webui.py "%s"' % (python_exec, language)
@@ -344,7 +351,7 @@ def change_tts_inference(bert_path, cnhubert_base_path, gpu_number, gpt_path, so
         os.environ["sovits_path"] = sovits_path
         os.environ["cnhubert_base_path"] = cnhubert_base_path
         os.environ["bert_path"] = bert_path
-        os.environ["_CUDA_VISIBLE_DEVICES"] = str(fix_gpu_number(gpu_number))
+        os.environ["_CUDA_VISIBLE_DEVICES"] = fix_gpu_number(gpu_number)
         os.environ["is_half"] = str(is_half)
         os.environ["infer_ttswebui"] = str(webui_port_infer_tts)
         os.environ["is_share"] = str(is_share)
@@ -505,7 +512,7 @@ def open1Ba(
 ):
     global p_train_SoVITS
     if p_train_SoVITS == None:
-        exp_name = exp_name.rstrip(" ")
+        exp_name=exp_name.rstrip(" ")
         config_file = (
             "GPT_SoVITS/configs/s2.json"
             if version not in {"v2Pro", "v2ProPlus"}
@@ -518,6 +525,21 @@ def open1Ba(
         os.makedirs("%s/logs_s2_%s" % (s2_dir, version), exist_ok=True)
         if check_for_existance([s2_dir], is_train=True):
             check_details([s2_dir], is_train=True)
+        if version in {"v2Pro", "v2ProPlus"}:
+            sv_dir = f"{s2_dir}/7-sv_cn"
+            if (os.path.exists(sv_dir) == False) or (len([_ for _ in os.listdir(sv_dir) if _.endswith(".pt")]) == 0):
+                try:
+                    gr.Warning(i18n("缺少 7-sv_cn 目录或内容为空，请先执行 '语音自监督特征提取' 的 sv 步骤"))
+                except Exception:
+                    pass
+                yield (
+                    process_info(process_name_sovits, "failed"),
+                    {"__type__": "update", "visible": True},
+                    {"__type__": "update", "visible": False},
+                    {"__type__": "update"},
+                    {"__type__": "update"},
+                )
+                return
         if is_half == False:
             data["train"]["fp16_run"] = False
             batch_size = max(1, batch_size // 2)
@@ -554,15 +576,25 @@ def open1Ba(
         print(cmd)
         p_train_SoVITS = Popen(cmd, shell=True)
         p_train_SoVITS.wait()
+        exit_code = p_train_SoVITS.returncode if hasattr(p_train_SoVITS, "returncode") else 0
         p_train_SoVITS = None
-        SoVITS_dropdown_update, GPT_dropdown_update = change_choices()
-        yield (
-            process_info(process_name_sovits, "finish"),
-            {"__type__": "update", "visible": True},
-            {"__type__": "update", "visible": False},
-            SoVITS_dropdown_update,
-            GPT_dropdown_update,
-        )
+        if exit_code == 0:
+            SoVITS_dropdown_update, GPT_dropdown_update = change_choices()
+            yield (
+                process_info(process_name_sovits, "finish"),
+                {"__type__": "update", "visible": True},
+                {"__type__": "update", "visible": False},
+                SoVITS_dropdown_update,
+                GPT_dropdown_update,
+            )
+        else:
+            yield (
+                process_info(process_name_sovits, "failed"),
+                {"__type__": "update", "visible": True},
+                {"__type__": "update", "visible": False},
+                {"__type__": "update"},
+                {"__type__": "update"},
+            )
     else:
         yield (
             process_info(process_name_sovits, "occupy"),
@@ -602,7 +634,7 @@ def open1Bb(
 ):
     global p_train_GPT
     if p_train_GPT == None:
-        exp_name = exp_name.rstrip(" ")
+        exp_name=exp_name.rstrip(" ")
         with open(
             "GPT_SoVITS/configs/s1longer.yaml" if version == "v1" else "GPT_SoVITS/configs/s1longer-v2.yaml"
         ) as f:
@@ -629,7 +661,7 @@ def open1Bb(
         data["output_dir"] = "%s/logs_s1_%s" % (s1_dir, version)
         # data["version"]=version
 
-        os.environ["_CUDA_VISIBLE_DEVICES"] = str(fix_gpu_numbers(gpu_numbers.replace("-", ",")))
+        os.environ["_CUDA_VISIBLE_DEVICES"] = fix_gpu_numbers(gpu_numbers.replace("-", ","))
         os.environ["hz"] = "25hz"
         tmp_config_path = "%s/tmp_s1.yaml" % tmp
         with open(tmp_config_path, "w") as f:
@@ -802,7 +834,7 @@ def open1a(inp_text, inp_wav_dir, exp_name, gpu_numbers, bert_pretrained_dir):
                 {
                     "i_part": str(i_part),
                     "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                     "is_half": str(is_half),
                 }
             )
@@ -864,7 +896,7 @@ def close1a():
     )
 
 
-sv_path = str(pretrained_model_path("sv", "pretrained_eres2netv2w24s4ep4.ckpt"))
+sv_path = "GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt"
 ps1b = []
 process_name_1b = i18n("语音自监督特征提取")
 
@@ -893,7 +925,7 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
                 {
                     "i_part": str(i_part),
                     "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                 }
             )
             os.environ.update(config)
@@ -915,7 +947,7 @@ def open1b(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, ssl_pretrained
                     {
                         "i_part": str(i_part),
                         "all_parts": str(all_parts),
-                        "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                        "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                     }
                 )
                 os.environ.update(config)
@@ -987,7 +1019,7 @@ def open1c(version, inp_text, inp_wav_dir, exp_name, gpu_numbers, pretrained_s2G
                 {
                     "i_part": str(i_part),
                     "all_parts": str(all_parts),
-                    "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                    "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                 }
             )
             os.environ.update(config)
@@ -1087,7 +1119,7 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1134,7 +1166,7 @@ def open1abc(
                     {
                         "i_part": str(i_part),
                         "all_parts": str(all_parts),
-                        "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                        "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                     }
                 )
                 os.environ.update(config)
@@ -1156,7 +1188,7 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1196,7 +1228,7 @@ def open1abc(
                         {
                             "i_part": str(i_part),
                             "all_parts": str(all_parts),
-                            "_CUDA_VISIBLE_DEVICES": str(fix_gpu_number(gpu_names[i_part])),
+                            "_CUDA_VISIBLE_DEVICES": fix_gpu_number(gpu_names[i_part]),
                         }
                     )
                     os.environ.update(config)
@@ -1560,7 +1592,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         with gr.Row():
                             bert_pretrained_dir = gr.Textbox(
                                 label=i18n("预训练中文BERT模型路径"),
-                                value=str(pretrained_model_path("chinese-roberta-wwm-ext-large")),
+                                value="GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large",
                                 interactive=False,
                                 lines=2,
                             )
@@ -1585,7 +1617,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                         with gr.Row():
                             cnhubert_base_dir = gr.Textbox(
                                 label=i18n("预训练SSL模型路径"),
-                                value=str(pretrained_model_path("chinese-hubert-base")),
+                                value="GPT_SoVITS/pretrained_models/chinese-hubert-base",
                                 interactive=False,
                                 lines=2,
                             )

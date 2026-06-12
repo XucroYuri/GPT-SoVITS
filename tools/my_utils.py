@@ -99,7 +99,11 @@ def check_details(path_list=None, is_train=False, is_dataset_processing=False):
                 return
         with open(list_path, "r", encoding="utf8") as f:
             line = f.readline().strip("\n").split("\n")
-        wav_name, _, __, ___ = line[0].split("|")
+        parts = line[0].split("|")
+        if len(parts) < 1:
+            gr.Warning(i18n("List文件格式错误：至少需要1列"))
+            return
+        wav_name = parts[0]
         wav_name = clean_path(wav_name)
         if audio_path != "" and audio_path != None:
             wav_name = os.path.basename(wav_name)
@@ -109,7 +113,7 @@ def check_details(path_list=None, is_train=False, is_dataset_processing=False):
         if os.path.exists(wav_path):
             ...
         else:
-            gr.Warning(wav_path + i18n("路径错误"))
+            gr.Warning(wav_path+i18n("路径错误"))
         return
     if is_train:
         path_list.append(os.path.join(path_list[0], "2-name2text.txt"))

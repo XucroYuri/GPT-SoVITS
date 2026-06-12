@@ -6,37 +6,23 @@
 全部按英文识别
 全部按日文识别
 """
-import psutil
-import os
-
-def set_high_priority():
-    """把当前 Python 进程设为 HIGH_PRIORITY_CLASS"""
-    if os.name != "nt":
-        return # 仅 Windows 有效
-    p = psutil.Process(os.getpid())
-    try:
-        p.nice(psutil.HIGH_PRIORITY_CLASS)
-        print("已将进程优先级设为 High")
-    except psutil.AccessDenied:
-        print("权限不足，无法修改优先级（请用管理员运行）")
-set_high_priority()
 import json
 import logging
-import os
-from pathlib import Path
+import os,sys
+now_dir = os.getcwd()
+sys.path.append(now_dir)
+sys.path.append("%s/GPT_SoVITS" % (now_dir))
+from tools.startup_bootstrap import apply_startup_patches
+
+apply_startup_patches()
 import re
 import sys
 import traceback
 import warnings
 
-project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import torch
 import torchaudio
 from text.LangSegmenter import LangSegmenter
-from model_store import apply_project_runtime_env, bigvgan_model_dir, pretrained_model_path, v4_vocoder_path
 
 logging.getLogger("markdown_it").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -49,17 +35,46 @@ logging.getLogger("multipart.multipart").setLevel(logging.ERROR)
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 version = model_version = os.environ.get("version", "v2")
-apply_project_runtime_env()
 
-from config import change_choices, get_weights_names, name2gpt_path, name2sovits_path
+from config import (
+    change_choices,
+    get_weights_names,
+    name2gpt_path,
+    name2sovits_path,
+    pretrained_gpt_name,
+    pretrained_sovits_name,
+    exp_root,
+    SoVITS_weight_root,
+    GPT_weight_root,
+)
+from tools.reference_audio_metadata import (
+    iter_asr_list_files,
+    read_asr_metadata_map,
+    resolve_reference_character,
+)
+from tools.inference_model_defaults import resolve_weight_selection
+from tools.startup_check import require_existing_weight_path
 
 SoVITS_names, GPT_names = get_weights_names()
-from config import pretrained_sovits_name
 
 path_sovits_v3 = pretrained_sovits_name["v3"]
 path_sovits_v4 = pretrained_sovits_name["v4"]
 is_exist_s2gv3 = os.path.exists(path_sovits_v3)
 is_exist_s2gv4 = os.path.exists(path_sovits_v4)
+
+def _label_for_pretrained(name_map, pretrained_path, fallback):
+    target = os.path.normpath(pretrained_path)
+    for label, path in name_map.items():
+        if os.path.normpath(path) == target:
+            return label
+    return fallback
+
+default_gpt_dropdown_label = _label_for_pretrained(name2gpt_path, pretrained_gpt_name["v3"], GPT_names[-1])
+default_sovits_dropdown_label = _label_for_pretrained(
+    name2sovits_path,
+    pretrained_sovits_name["v2ProPlus"],
+    SoVITS_names[0],
+)
 
 if os.path.exists("./weight.json"):
     pass
@@ -70,12 +85,30 @@ else:
 with open("./weight.json", "r", encoding="utf-8") as file:
     weight_data = file.read()
     weight_data = json.loads(weight_data)
-    gpt_path = os.environ.get("gpt_path", weight_data.get("GPT", {}).get(version, GPT_names[-1]))
-    sovits_path = os.environ.get("sovits_path", weight_data.get("SoVITS", {}).get(version, SoVITS_names[0]))
+    gpt_selection = resolve_weight_selection(
+        os.environ.get("gpt_path"),
+        weight_data.get("GPT", {}).get(version),
+        GPT_names[-1],
+        default_gpt_dropdown_label,
+        name2gpt_path,
+    )
+    sovits_selection = resolve_weight_selection(
+        os.environ.get("sovits_path"),
+        weight_data.get("SoVITS", {}).get(version),
+        SoVITS_names[0],
+        default_sovits_dropdown_label,
+        name2sovits_path,
+    )
+    gpt_path = gpt_selection.resolved_path
+    sovits_path = sovits_selection.resolved_path
+    gpt_dropdown_value = gpt_selection.display_value
+    sovits_dropdown_value = sovits_selection.display_value
     if isinstance(gpt_path, list):
         gpt_path = gpt_path[0]
     if isinstance(sovits_path, list):
         sovits_path = sovits_path[0]
+    gpt_path = require_existing_weight_path("GPT模型权重", gpt_path, now_dir, "GPT", name2gpt_path)
+    sovits_path = require_existing_weight_path("SoVITS模型权重", sovits_path, now_dir, "SoVITS", name2sovits_path)
 
 # print(2333333)
 # print(os.environ["gpt_path"])
@@ -86,8 +119,8 @@ with open("./weight.json", "r", encoding="utf-8") as file:
 # print(version)###GPT version里没有s2的v2pro
 # print(weight_data.get("GPT", {}).get(version, GPT_names[-1]))
 
-cnhubert_base_path = os.environ.get("cnhubert_base_path", str(pretrained_model_path("chinese-hubert-base")))
-bert_path = os.environ.get("bert_path", str(pretrained_model_path("chinese-roberta-wwm-ext-large")))
+cnhubert_base_path = os.environ.get("cnhubert_base_path", "GPT_SoVITS/pretrained_models/chinese-hubert-base")
+bert_path = os.environ.get("bert_path", "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large")
 infer_ttswebui = os.environ.get("infer_ttswebui", 9872)
 infer_ttswebui = int(infer_ttswebui)
 is_share = os.environ.get("is_share", "False")
@@ -98,6 +131,7 @@ is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 # is_half=False
 punctuation = set(["!", "?", "…", ",", ".", "-", " "])
 import gradio as gr
+import pypinyin
 import librosa
 import numpy as np
 from feature_extractor import cnhubert
@@ -108,6 +142,594 @@ cnhubert.cnhubert_base_path = cnhubert_base_path
 import random
 
 from GPT_SoVITS.module.models import Generator, SynthesizerTrn, SynthesizerTrnV3
+
+ref_audio_map = {}
+ref_text_map = {}
+ref_key_map = {}
+ref_roles_set = set()
+ref_langs_set = set()
+model_map = {"全部": {"GPT": [], "SoVITS": []}}
+
+def _parse_exp_from_weight(path):
+    try:
+        base = os.path.basename(path)
+        if "_e" in base:
+            return base.split("_e")[0]
+        if "-e" in base:
+            return base.split("-e")[0]
+        if "_G_" in base:
+            return base.split("_G_")[0]
+        if "_D_" in base:
+            return base.split("_D_")[0]
+        return os.path.splitext(base)[0]
+    except Exception:
+        return None
+
+def _extract_exp_prefix(name):
+    base = os.path.splitext(os.path.basename(name))[0]
+    if "_e" in base:
+        return base.split("_e")[0]
+    if "-e" in base:
+        return base.split("-e")[0]
+    return base
+
+def _derive_character_from_prefix(exp):
+    logs_dir = os.path.join(now_dir, exp_root, exp)
+    char = ""
+    meta_path = os.path.join(logs_dir, "audio_metadata.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+                cnt = {}
+                for v in m.values():
+                    if isinstance(v, dict):
+                        c = str(v.get("character", "")).strip()
+                        if c:
+                            cnt[c] = cnt.get(c, 0) + 1
+                if cnt:
+                    char = sorted(cnt.items(), key=lambda x: (-x[1], x[0]))[0][0]
+        except Exception:
+            char = ""
+    if not char:
+        tokens = [t for t in exp.split("-") if t]
+        kept = []
+        for t in tokens:
+            if re.match(r"^\d+[a-zA-Z]+$", t):
+                continue
+            if re.match(r"^\d+$", t):
+                continue
+            if re.match(r"^\d", t):
+                r = re.sub(r"^\d+", "", t)
+                if re.match(r"^[a-zA-Z]+$", r):
+                    continue
+                if len(r) > 0:
+                    kept.append(r)
+            else:
+                kept.append(t)
+        char = "-".join(kept) if kept else exp
+    return char
+
+def refresh_character_map():
+    new_map = {}
+    for root in SoVITS_weight_root:
+        if os.path.exists(root):
+            for name in os.listdir(root):
+                if name.endswith(".pth"):
+                    exp = _extract_exp_prefix(name)
+                    char = _derive_character_from_prefix(exp)
+                    new_map[name] = char
+    for root in GPT_weight_root:
+        if os.path.exists(root):
+            for name in os.listdir(root):
+                if name.endswith(".ckpt"):
+                    exp = _extract_exp_prefix(name)
+                    char = _derive_character_from_prefix(exp)
+                    new_map[name] = char
+    map_path = os.path.join(now_dir, "character_map.json")
+    with open(map_path, "w", encoding="utf-8") as f:
+        json.dump(new_map, f, ensure_ascii=False, indent=2)
+
+reference_audio_dir = os.path.join(now_dir, "参考音频")
+
+def _lang_map(s):
+    m = {
+        "中文": "zh",
+        "英文": "en",
+        "日文": "ja",
+        "粤语": "yue",
+        "韩文": "ko",
+        "ZH": "zh",
+        "EN": "en",
+        "JA": "ja",
+        "YUE": "yue",
+        "KO": "ko",
+        "zh": "zh",
+        "en": "en",
+        "ja": "ja",
+        "yue": "yue",
+        "ko": "ko",
+    }
+    return m.get(s, s)
+
+def _parse_refdir_filename(name):
+    base = os.path.splitext(name)[0]
+    character = ""
+    lang = ""
+    text = base
+    try:
+        if base.startswith("[") and "]" in base:
+            # [角色_语种]文本
+            head, rest = base.split("]", 1)
+            head = head.strip("[]")
+            if "_" in head:
+                character, lang = head.split("_", 1)
+            else:
+                character = head
+            text = rest
+        elif "_" in base:
+            # 角色_语种文本
+            head, rest = base.split("_", 1)
+            character = head
+            # 语种常见词优先匹配
+            known = ["中文", "英文", "日文", "粤语", "韩文", "zh", "en", "ja", "yue", "ko", "JP", "EN", "ZH"]
+            for k in known:
+                if rest.startswith(k):
+                    lang = k
+                    text = rest[len(k):]
+                    break
+            if lang == "":
+                text = rest
+        else:
+            text = base
+    except Exception:
+        pass
+    return character.strip(), _lang_map(lang.strip()), text.strip()
+
+def _refdir_meta_path():
+    return os.path.join(reference_audio_dir, "audio_metadata.json")
+
+def _read_refdir_meta():
+    p = _refdir_meta_path()
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def _write_refdir_meta(name, character, emotion, remark, text_override, lang):
+    os.makedirs(reference_audio_dir, exist_ok=True)
+    p = _refdir_meta_path()
+    data = _read_refdir_meta()
+    data[name] = data.get(name, {})
+    if character is not None:
+        data[name]["character"] = character
+    if emotion is not None:
+        data[name]["emotion"] = emotion
+    if remark is not None:
+        data[name]["remark"] = remark
+    if text_override is not None:
+        t = str(text_override).strip()
+        data[name]["text_override"] = t if len(t) > 0 else data[name].get("text_override", "")
+    if lang is not None:
+        data[name]["lang"] = lang
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+corrections_dict = {}
+
+def load_corrections():
+    global corrections_dict
+    corrections_dict = {}
+    # Load polyphones (多音字.txt)
+    poly_path = os.path.join(now_dir, "多音字.txt")
+    if os.path.exists(poly_path):
+        try:
+            with open(poly_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    # Format: Word ["py1", "py2"]
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        word = parts[0]
+                        pinyin_list_str = parts[1]
+                        try:
+                            pinyin_list = json.loads(pinyin_list_str)
+                            formatted_pinyin = [[p] for p in pinyin_list]
+                            pypinyin.load_phrases_dict({word: formatted_pinyin})
+                        except Exception as e:
+                            print(f"Error parsing polyphone line: {line}, {e}")
+        except Exception as e:
+            print(f"Error loading polyphones: {e}")
+
+    # Load corrections (念法纠正.txt)
+    corr_path = os.path.join(now_dir, "念法纠正.txt")
+    if os.path.exists(corr_path):
+        try:
+            with open(corr_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    # Format: Key Value
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2:
+                        corrections_dict[parts[0]] = parts[1]
+        except Exception as e:
+            print(f"Error loading corrections: {e}")
+    print(f"Loaded {len(corrections_dict)} text corrections.")
+
+def apply_text_corrections(text):
+    if not text:
+        return text
+    for key, val in corrections_dict.items():
+        text = text.replace(key, val)
+    return text
+
+load_corrections()
+
+ 
+
+def build_ref_audio_index(allow_all=False, sovits_selected=None, gpt_selected=None, include_refdir=False, filter_role="全部", filter_lang="全部", add_tail=True):
+    global ref_audio_map, ref_text_map, ref_key_map
+    ref_audio_map = {}
+    ref_text_map = {}
+    ref_key_map = {}
+    ref_roles_set.clear()
+    ref_langs_set.clear()
+    logs_root = os.path.join(now_dir, exp_root)
+    if not os.path.exists(logs_root):
+        return [i18n("未发现参考音频")]
+    allowed_exps = set()
+    if not allow_all:
+        if sovits_selected:
+            e = _parse_exp_from_weight(sovits_selected)
+            if e:
+                allowed_exps.add(e)
+        if gpt_selected:
+            e = _parse_exp_from_weight(gpt_selected)
+            if e:
+                allowed_exps.add(e)
+    choices = []
+    for exp in os.listdir(logs_root):
+        if not allow_all and len(allowed_exps) > 0 and exp not in allowed_exps:
+            continue
+        exp_dir = os.path.join(logs_root, exp)
+        wav_dir = os.path.join(exp_dir, "5-wav32k")
+        name2text_path = os.path.join(exp_dir, "2-name2text.txt")
+        text_map = {}
+        if os.path.exists(name2text_path):
+            try:
+                with open(name2text_path, "r", encoding="utf-8") as f:
+                    for line in f.read().strip("\n").split("\n"):
+                        segs = line.split("\t")
+                        if len(segs) >= 4:
+                            key = segs[0].strip()
+                            text_map[key] = segs[3].strip()
+            except Exception:
+                pass
+        meta_path = os.path.join(exp_dir, "audio_metadata.json")
+        meta_map = {}
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta_map = json.load(f)
+            except Exception:
+                meta_map = {}
+        list_map = read_asr_metadata_map(now_dir, exp)
+        experiment_character = _derive_character_from_prefix(exp)
+        if os.path.exists(wav_dir):
+            for name in os.listdir(wav_dir):
+                if name.endswith(".wav"):
+                    path = os.path.join(wav_dir, name)
+                    meta = meta_map.get(name, {}) if isinstance(meta_map.get(name, {}), dict) else {}
+                    character = meta.get("character", "")
+                    emotion = meta.get("emotion", "")
+                    override = meta.get("text_override")
+                    text = override if override else text_map.get(name, "")
+                    remark = meta.get("remark", "")
+                    asr = list_map.get(name, None)
+                    asr_character = ""
+                    if asr:
+                        asr_character = asr.get("speaker_name", "")
+                        if asr.get("text"):
+                            text = asr.get("text")
+                        if asr.get("emotion"):
+                            emotion = asr.get("emotion")
+                        if asr.get("remark"):
+                            remark = asr.get("remark")
+                    character = resolve_reference_character(
+                        current_character="",
+                        metadata_character=character,
+                        experiment_character=experiment_character,
+                        speaker_name=asr_character,
+                    )
+                    rem = f"[{remark}]" if remark else ""
+                    label_main = (
+                        f"{character}（{emotion}）{rem}：{text}" if (character or emotion or text or rem) else name
+                    )
+                    display = f"{label_main} [{exp}/{name}]" if add_tail else label_main
+                    if filter_role != "全部" and (character or "") != filter_role:
+                        continue
+                    ref_audio_map[display] = path
+                    ref_text_map[display] = text
+                    ref_key_map[display] = {
+                        "origin": "logs",
+                        "exp": exp,
+                        "name": name,
+                        "path": path,
+                        "character": character,
+                        "emotion": emotion,
+                        "remark": remark,
+                    }
+                    if character:
+                        ref_roles_set.add(character)
+                    choices.append(display)
+    if include_refdir and os.path.exists(reference_audio_dir):
+        meta_map = _read_refdir_meta()
+        for name in os.listdir(reference_audio_dir):
+            if name.lower().endswith(".wav"):
+                path = os.path.join(reference_audio_dir, name)
+                meta = meta_map.get(name, {}) if isinstance(meta_map.get(name, {}), dict) else {}
+                if meta:
+                    character = meta.get("character", "")
+                    emotion = meta.get("emotion", "")
+                    remark = meta.get("remark", "")
+                    lang = meta.get("lang", "")
+                    override = meta.get("text_override")
+                    text = override if override else ""
+                else:
+                    character, lang, text = _parse_refdir_filename(name)
+                    emotion = ""
+                    remark = ""
+                rem = f"[{remark}]" if remark else ""
+                label_main = f"{character}（{emotion}）{rem}：{text}" if (character or emotion or text or rem) else name
+                display = f"{label_main} [参考音频/{name}]" if add_tail else label_main
+                # filters
+                if filter_role != "全部" and (character or "") != filter_role:
+                    continue
+                if filter_lang != "全部" and (lang or "") != filter_lang:
+                    continue
+                ref_audio_map[display] = path
+                ref_text_map[display] = text
+                ref_key_map[display] = {"origin": "refdir", "name": name, "path": path, "character": character, "lang": lang, "emotion": emotion, "remark": remark}
+                if character:
+                    ref_roles_set.add(character)
+                if lang:
+                    ref_langs_set.add(lang)
+                choices.append(display)
+    return choices if choices else [i18n("未发现参考音频")]
+
+def _get_label_info(label):
+    if label is None:
+        return None
+    info = ref_key_map.get(label)
+    if info is not None:
+        return info
+    parts = str(label).split("/")
+    if len(parts) >= 2:
+        return {"origin": "logs", "exp": parts[0], "name": parts[1]}
+    return None
+
+def _read_meta(exp):
+    exp_dir = os.path.join(now_dir, exp_root, exp)
+    meta_path = os.path.join(exp_dir, "audio_metadata.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def _write_meta(exp, key, character, emotion, remark, text_override):
+    exp_dir = os.path.join(now_dir, exp_root, exp)
+    os.makedirs(exp_dir, exist_ok=True)
+    meta_path = os.path.join(exp_dir, "audio_metadata.json")
+    data = _read_meta(exp)
+    data[key] = data.get(key, {})
+    if character is not None:
+        data[key]["character"] = character
+    if emotion is not None:
+        data[key]["emotion"] = emotion
+    if remark is not None:
+        data[key]["remark"] = remark
+    if text_override is not None:
+        t = str(text_override).strip()
+        data[key]["text_override"] = t if len(t) > 0 else data[key].get("text_override", "")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def on_select_ref_audio(label, current_character=None):
+    path = ref_audio_map.get(label, None)
+    text = ref_text_map.get(label, "")
+    info = _get_label_info(label)
+    character = ""
+    emotion = ""
+    remark = ""
+    # overlay with meta for logs/refdir
+    plabel = None
+    if info and info.get("origin") == "logs":
+        exp = info.get("exp")
+        key = info.get("name")
+        meta = _read_meta(exp) if exp else {}
+        m = meta.get(key, {}) if isinstance(meta.get(key, {}), dict) else {}
+        character = m.get("character", "")
+        emotion = m.get("emotion", "")
+        remark = m.get("remark", "")
+        asr = read_asr_metadata_map(now_dir, exp).get(key)
+        asr_character = ""
+        if asr:
+            asr_character = asr.get("speaker_name", "")
+            if asr.get("text"):
+                text = asr.get("text")
+            if asr.get("emotion"):
+                emotion = asr.get("emotion")
+            if asr.get("remark"):
+                remark = asr.get("remark")
+        character = resolve_reference_character(
+            current_character=current_character,
+            metadata_character=character,
+            experiment_character=_derive_character_from_prefix(exp) if exp else "",
+            speaker_name=asr_character,
+        )
+    elif info and info.get("origin") == "refdir":
+        meta_map = _read_refdir_meta()
+        name = info.get("name")
+        m = meta_map.get(name, {}) if isinstance(meta_map.get(name, {}), dict) else {}
+        if m:
+            character = m.get("character", "")
+            emotion = m.get("emotion", "")
+            remark = m.get("remark", "")
+            lang = m.get("lang", "")
+            override = m.get("text_override")
+            text = override if override else ""
+        else:
+            character = info.get("character", "")
+            emotion = ""
+            remark = ""
+            lang = info.get("lang", "")
+        def _lang_to_label(code):
+            mapping = {
+                "zh": i18n("中文"),
+                "en": i18n("英文"),
+                "ja": i18n("日文"),
+                "yue": i18n("粤语"),
+                "ko": i18n("韩文"),
+            }
+            return mapping.get(code)
+        plabel = _lang_to_label(lang) if lang else None
+    return (
+        {"__type__": "update", "value": path},
+        {"__type__": "update", "value": text},
+        {"__type__": "update", "value": character},
+        {"__type__": "update", "value": emotion},
+        {"__type__": "update", "value": remark},
+        {"prompt_text": text, "character": character, "emotion": emotion, "remark": remark},
+        {"__type__": "update", "interactive": False},
+        {"__type__": "update", "value": plabel} if plabel else {"__type__": "update"},
+    )
+
+def save_audio_metadata(label, character, emotion, remark, prompt_text, prompt_language, write_asr_list=True):
+    info = _get_label_info(label)
+    if info and info.get("origin") == "logs":
+        exp = info.get("exp")
+        key = info.get("name")
+        _write_meta(exp, key, character, emotion, remark, prompt_text)
+        if write_asr_list:
+            base = os.path.join(now_dir, "output", "asr_opt", exp)
+            target = None
+            for path in iter_asr_list_files(base):
+                target = str(path)
+                break
+            if target:
+                try:
+                    bak = target + ".bak"
+                    with open(target, "r", encoding="utf-8", errors="ignore") as fp:
+                        lines = fp.read().strip("\n").split("\n")
+                    with open(bak, "w", encoding="utf-8") as bp:
+                        bp.write("\n".join(lines))
+                    updated = False
+                    new_lines = []
+                    for line in lines:
+                        if "|" not in line:
+                            new_lines.append(line)
+                            continue
+                        parts = line.split("|")
+                        if len(parts) < 4:
+                            new_lines.append(line)
+                            continue
+                        n = os.path.basename(parts[0])
+                        if n == key:
+                            while len(parts) < 6:
+                                parts.append("")
+                            parts[3] = str(prompt_text or parts[3])
+                            parts[4] = str(emotion or parts[4])
+                            parts[5] = str(remark or parts[5])
+                            new_lines.append("|".join(parts))
+                            updated = True
+                        else:
+                            new_lines.append(line)
+                    if updated:
+                        with open(target, "w", encoding="utf-8") as wp:
+                            wp.write("\n".join(new_lines))
+                except Exception:
+                    pass
+    elif info and info.get("origin") == "refdir":
+        name = info.get("name")
+        _write_refdir_meta(name, character, emotion, remark, prompt_text, prompt_language)
+    return {}
+
+def build_model_map():
+    global model_map
+    refresh_character_map()
+    model_map = {"全部": {"GPT": [], "SoVITS": []}}
+    for root in SoVITS_weight_root:
+        if os.path.exists(root):
+            for name in os.listdir(root):
+                p = os.path.join(root, name)
+                if os.path.isdir(p):
+                    char = name
+                    model_map.setdefault(char, {"GPT": [], "SoVITS": []})
+                    for f in os.listdir(p):
+                        if f.endswith(".pth"):
+                            model_map[char]["SoVITS"].append(f"{p}/{f}")
+                elif name.endswith(".pth"):
+                    model_map["全部"]["SoVITS"].append(f"{root}/{name}")
+    for root in GPT_weight_root:
+        if os.path.exists(root):
+            for name in os.listdir(root):
+                p = os.path.join(root, name)
+                if os.path.isdir(p):
+                    char = name
+                    model_map.setdefault(char, {"GPT": [], "SoVITS": []})
+                    for f in os.listdir(p):
+                        if f.endswith(".ckpt"):
+                            model_map[char]["GPT"].append(f"{p}/{f}")
+                elif name.endswith(".ckpt"):
+                    model_map["全部"]["GPT"].append(f"{root}/{name}")
+    map_path = os.path.join(now_dir, "character_map.json")
+    if os.path.exists(map_path):
+        try:
+            with open(map_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+                for k, v in m.items():
+                    char = v
+                    model_map.setdefault(char, {"GPT": [], "SoVITS": []})
+                    if k.endswith(".pth"):
+                        for root in SoVITS_weight_root:
+                            candidate = os.path.join(root, k)
+                            if os.path.exists(candidate):
+                                model_map[char]["SoVITS"].append(candidate)
+                    if k.endswith(".ckpt"):
+                        for root in GPT_weight_root:
+                            candidate = os.path.join(root, k)
+                            if os.path.exists(candidate):
+                                model_map[char]["GPT"].append(candidate)
+        except Exception:
+            pass
+    return sorted(list(model_map.keys()))
+
+def update_model_choices(character):
+    build_model_map()
+    chars = sorted(list(model_map.keys()))
+    if character not in chars:
+        character = "全部"
+    g_list = model_map.get(character, {}).get("GPT", [])
+    s_list = model_map.get(character, {}).get("SoVITS", [])
+    if character == "全部":
+        g_list = sorted(GPT_names, key=custom_sort_key)
+        s_list = sorted(SoVITS_names, key=custom_sort_key)
+    return (
+        {"__type__": "update", "choices": sorted(chars), "value": character},
+        {"__type__": "update", "choices": sorted(g_list, key=custom_sort_key)},
+        {"__type__": "update", "choices": sorted(s_list, key=custom_sort_key)},
+    )
 
 
 def set_seed(seed):
@@ -143,38 +765,6 @@ if torch.cuda.is_available():
     device = "cuda"
 else:
     device = "cpu"
-
-
-def check_cuda_graph_support():
-    if device != "cuda":
-        return False
-    try:
-        major, _ = torch.cuda.get_device_capability()
-        if major < 7:
-            print("CUDA Graph: GPU compute capability < 7.0, disabled")
-            return False
-        a = torch.randn(2, 2, device="cuda")
-        g = torch.cuda.CUDAGraph()
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            b = a * 2
-        torch.cuda.current_stream().wait_stream(s)
-        out = torch.empty_like(b)
-        with torch.cuda.graph(g):
-            out.copy_(a * 2)
-        g.replay()
-        torch.cuda.synchronize()
-        del a, b, out, g, s
-        torch.cuda.empty_cache()
-        print("CUDA Graph: support check passed, auto-enabled")
-        return True
-    except Exception as e:
-        print(f"CUDA Graph: support check failed ({e}), disabled")
-        return False
-
-
-cuda_graph_supported = check_cuda_graph_support()
 
 dict_language_v1 = {
     i18n("中文"): "all_zh",  # 全部按中文识别
@@ -268,8 +858,7 @@ v3v4set = {"v3", "v4"}
 def change_sovits_weights(sovits_path, prompt_language=None, text_language=None):
     if "！" in sovits_path or "!" in sovits_path:
         sovits_path = name2sovits_path[sovits_path]
-    global vq_model, hps, version, model_version, dict_language, if_lora_v3, t2s_model_cudagraph
-    t2s_model_cudagraph = None
+    global vq_model, hps, version, model_version, dict_language, if_lora_v3
     version, model_version, if_lora_v3 = get_sovits_version_from_path_fast(sovits_path)
     print(sovits_path, version, model_version, if_lora_v3)
     is_exist = is_exist_s2gv3 if model_version == "v3" else is_exist_s2gv4
@@ -413,16 +1002,10 @@ except:
     pass
 
 
-t2s_model_cudagraph = None
-gpt_path_global = None
-
-
 def change_gpt_weights(gpt_path):
     if "！" in gpt_path or "!" in gpt_path:
         gpt_path = name2gpt_path[gpt_path]
-    global hz, max_sec, t2s_model, config, t2s_model_cudagraph, gpt_path_global
-    t2s_model_cudagraph = None
-    gpt_path_global = gpt_path
+    global hz, max_sec, t2s_model, config
     hz = 50
     dict_s1 = torch.load(gpt_path, map_location="cpu", weights_only=False)
     config = dict_s1["config"]
@@ -444,6 +1027,7 @@ def change_gpt_weights(gpt_path):
 
 
 change_gpt_weights(gpt_path)
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import torch
 
 now_dir = os.getcwd()
@@ -487,7 +1071,7 @@ def init_bigvgan():
     from BigVGAN import bigvgan
 
     bigvgan_model = bigvgan.BigVGAN.from_pretrained(
-        str(bigvgan_model_dir()),
+        "%s/GPT_SoVITS/pretrained_models/models--nvidia--bigvgan_v2_24khz_100band_256x" % (now_dir,),
         use_cuda_kernel=False,
     )  # if True, RuntimeError: Ninja is required to load C++ extensions
     # remove weight norm in the model and set to eval mode
@@ -517,7 +1101,7 @@ def init_hifigan():
     hifigan_model.eval()
     hifigan_model.remove_weight_norm()
     state_dict_g = torch.load(
-        str(v4_vocoder_path()),
+        "%s/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth" % (now_dir,),
         map_location="cpu",
         weights_only=False,
     )
@@ -644,67 +1228,68 @@ from text import chinese
 
 
 def get_phones_and_bert(text, language, version, final=False):
-    text = re.sub(r' {2,}', ' ', text)
-    textlist = []
-    langlist = []
-    if language == "all_zh":
-        for tmp in LangSegmenter.getTexts(text,"zh"):
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    elif language == "all_yue":
-        for tmp in LangSegmenter.getTexts(text,"zh"):
-            if tmp["lang"] == "zh":
-                tmp["lang"] = "yue"
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    elif language == "all_ja":
-        for tmp in LangSegmenter.getTexts(text,"ja"):
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    elif language == "all_ko":
-        for tmp in LangSegmenter.getTexts(text,"ko"):
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    elif language == "en":
-        langlist.append("en")
-        textlist.append(text)
-    elif language == "auto":
-        for tmp in LangSegmenter.getTexts(text):
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    elif language == "auto_yue":
-        for tmp in LangSegmenter.getTexts(text):
-            if tmp["lang"] == "zh":
-                tmp["lang"] = "yue"
-            langlist.append(tmp["lang"])
-            textlist.append(tmp["text"])
-    else:
-        for tmp in LangSegmenter.getTexts(text):
-            if langlist:
-                if (tmp["lang"] == "en" and langlist[-1] == "en") or (tmp["lang"] != "en" and langlist[-1] != "en"):
-                    textlist[-1] += tmp["text"]
-                    continue
-            if tmp["lang"] == "en":
-                langlist.append(tmp["lang"])
+    if language in {"en", "all_zh", "all_ja", "all_ko", "all_yue"}:
+        formattext = text
+        while "  " in formattext:
+            formattext = formattext.replace("  ", " ")
+        if language == "all_zh":
+            if re.search(r"[A-Za-z]", formattext):
+                formattext = re.sub(r"[a-z]", lambda x: x.group(0).upper(), formattext)
+                formattext = chinese.mix_text_normalize(formattext)
+                return get_phones_and_bert(formattext, "zh", version)
             else:
-                # 因无法区别中日韩文汉字,以用户输入为准
-                langlist.append(language)
-            textlist.append(tmp["text"])
-    print(textlist)
-    print(langlist)
-    phones_list = []
-    bert_list = []
-    norm_text_list = []
-    for i in range(len(textlist)):
-        lang = langlist[i]
-        phones, word2ph, norm_text = clean_text_inf(textlist[i], lang, version)
-        bert = get_bert_inf(phones, word2ph, norm_text, lang)
-        phones_list.append(phones)
-        norm_text_list.append(norm_text)
-        bert_list.append(bert)
-    bert = torch.cat(bert_list, dim=1)
-    phones = sum(phones_list, [])
-    norm_text = "".join(norm_text_list)
+                phones, word2ph, norm_text = clean_text_inf(formattext, language, version)
+                bert = get_bert_feature(norm_text, word2ph).to(device)
+        elif language == "all_yue" and re.search(r"[A-Za-z]", formattext):
+            formattext = re.sub(r"[a-z]", lambda x: x.group(0).upper(), formattext)
+            formattext = chinese.mix_text_normalize(formattext)
+            return get_phones_and_bert(formattext, "yue", version)
+        else:
+            phones, word2ph, norm_text = clean_text_inf(formattext, language, version)
+            bert = torch.zeros(
+                (1024, len(phones)),
+                dtype=torch.float16 if is_half == True else torch.float32,
+            ).to(device)
+    elif language in {"zh", "ja", "ko", "yue", "auto", "auto_yue"}:
+        textlist = []
+        langlist = []
+        if language == "auto":
+            for tmp in LangSegmenter.getTexts(text):
+                langlist.append(tmp["lang"])
+                textlist.append(tmp["text"])
+        elif language == "auto_yue":
+            for tmp in LangSegmenter.getTexts(text):
+                if tmp["lang"] == "zh":
+                    tmp["lang"] = "yue"
+                langlist.append(tmp["lang"])
+                textlist.append(tmp["text"])
+        else:
+            for tmp in LangSegmenter.getTexts(text):
+                if langlist:
+                    if (tmp["lang"] == "en" and langlist[-1] == "en") or (tmp["lang"] != "en" and langlist[-1] != "en"):
+                        textlist[-1] += tmp["text"]
+                        continue
+                if tmp["lang"] == "en":
+                    langlist.append(tmp["lang"])
+                else:
+                    # 因无法区别中日韩文汉字,以用户输入为准
+                    langlist.append(language)
+                textlist.append(tmp["text"])
+        print(textlist)
+        print(langlist)
+        phones_list = []
+        bert_list = []
+        norm_text_list = []
+        for i in range(len(textlist)):
+            lang = langlist[i]
+            phones, word2ph, norm_text = clean_text_inf(textlist[i], lang, version)
+            bert = get_bert_inf(phones, word2ph, norm_text, lang)
+            phones_list.append(phones)
+            norm_text_list.append(norm_text)
+            bert_list.append(bert)
+        bert = torch.cat(bert_list, dim=1)
+        phones = sum(phones_list, [])
+        norm_text = "".join(norm_text_list)
 
     if not final and len(phones) < 6:
         return get_phones_and_bert("." + text, language, version, final=True)
@@ -810,9 +1395,12 @@ def get_tts_wav(
     sample_steps=8,
     if_sr=False,
     pause_second=0.3,
-    use_cuda_graph=False,
 ):
     global cache
+    load_corrections()
+    text = apply_text_corrections(text)
+    if prompt_text:
+        prompt_text = apply_text_corrections(prompt_text)
     if ref_wav_path:
         pass
     else:
@@ -920,51 +1508,20 @@ def get_tts_wav(
         if i_text in cache and if_freeze == True:
             pred_semantic = cache[i_text]
         else:
-            if use_cuda_graph and device == "cuda":
-                global t2s_model_cudagraph
-                if t2s_model_cudagraph is None:
-                    from AR.models.t2s_model_cudagraph import CUDAGraphRunner
-                    t2s_model_cudagraph = CUDAGraphRunner(
-                        CUDAGraphRunner.load_decoder(gpt_path_global),
-                        torch.device(device),
-                        torch.float16 if is_half else torch.float32,
-                    )
-                from AR.models.structs_cudagraph import T2SRequest
-                with torch.no_grad():
-                    t2s_request = T2SRequest(
-                        [all_phoneme_ids.squeeze(0)],
-                        all_phoneme_len,
-                        all_phoneme_ids.new_zeros((1, 0)) if ref_free else prompt,
-                        [bert.squeeze(0)],
-                        valid_length=1,
-                        top_k=top_k,
-                        top_p=top_p,
-                        temperature=temperature,
-                        early_stop_num=hz * max_sec,
-                        use_cuda_graph=True,
-                    )
-                    t2s_result = t2s_model_cudagraph.generate(t2s_request)
-                    if t2s_result.exception is not None:
-                        print(t2s_result.exception)
-                        print(t2s_result.traceback)
-                        raise RuntimeError("CUDA Graph T2S inference failed")
-                    pred_semantic = t2s_result.result[0].unsqueeze(0).unsqueeze(0)
-                    cache[i_text] = pred_semantic
-            else:
-                with torch.no_grad():
-                    pred_semantic, idx = t2s_model.model.infer_panel(
-                        all_phoneme_ids,
-                        all_phoneme_len,
-                        None if ref_free else prompt,
-                        bert,
-                        # prompt_phone_len=ph_offset,
-                        top_k=top_k,
-                        top_p=top_p,
-                        temperature=temperature,
-                        early_stop_num=hz * max_sec,
-                    )
-                    pred_semantic = pred_semantic[:, -idx:].unsqueeze(0)
-                    cache[i_text] = pred_semantic
+            with torch.no_grad():
+                pred_semantic, idx = t2s_model.model.infer_panel(
+                    all_phoneme_ids,
+                    all_phoneme_len,
+                    None if ref_free else prompt,
+                    bert,
+                    # prompt_phone_len=ph_offset,
+                    top_k=top_k,
+                    top_p=top_p,
+                    temperature=temperature,
+                    early_stop_num=hz * max_sec,
+                )
+                pred_semantic = pred_semantic[:, -idx:].unsqueeze(0)
+                cache[i_text] = pred_semantic
         t3 = ttime()
         is_v2pro = model_version in {"v2Pro", "v2ProPlus"}
         # print(23333,is_v2pro,model_version)
@@ -1178,7 +1735,7 @@ def cut5(inp):
 
 def custom_sort_key(s):
     # 使用正则表达式提取字符串中的数字部分和非数字部分
-    parts = re.split("(\d+)", s)
+    parts = re.split(r"(\d+)", s)
     # 将数字部分转换为整数，非数字部分保持不变
     parts = [int(part) if part.isdigit() else part for part in parts]
     return parts
@@ -1216,25 +1773,115 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
         ),
         elem_classes="markdown",
     )
+    gr.HTML(
+        """
+        <style>
+        #refresh_models button, #refresh_chars button, #refresh_wavs button, #save_info button, #inference_btn button { width: auto; min-width: 140px; height: auto; }
+        #save_info button:disabled { background-color: #6b7280; color: #d1d5db; cursor: not-allowed; opacity: 0.85; }
+        .block.padded { width: auto; }
+        .align-bottom-row .block { display: flex; align-items: flex-end; }
+        @media (min-width: 1280px) {
+            #refresh_models button, #refresh_chars button, #refresh_wavs button { width: 240px; }
+            #refresh_models button, #refresh_chars button, #refresh_wavs button { align-self: end; }
+        }
+        </style>
+        """
+    )
     with gr.Group():
         gr.Markdown(html_center(i18n("模型切换"), "h3"))
+        with gr.Row():
+            Character_dropdown = gr.Dropdown(
+                label=i18n("角色筛选"),
+                choices=build_model_map(),
+                value="全部",
+                interactive=True,
+                scale=14,
+            )
+            refresh_character_button = gr.Button(i18n("刷新角色分组"), variant="primary", scale=4, elem_id="refresh_chars")
         with gr.Row():
             GPT_dropdown = gr.Dropdown(
                 label=i18n("GPT模型列表"),
                 choices=sorted(GPT_names, key=custom_sort_key),
-                value=gpt_path,
+                value=gpt_dropdown_value,
                 interactive=True,
                 scale=14,
             )
             SoVITS_dropdown = gr.Dropdown(
                 label=i18n("SoVITS模型列表"),
                 choices=sorted(SoVITS_names, key=custom_sort_key),
-                value=sovits_path,
+                value=sovits_dropdown_value,
                 interactive=True,
                 scale=14,
             )
-            refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary", scale=14)
+            refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary", scale=4, elem_id="refresh_models")
             refresh_button.click(fn=change_choices, inputs=[], outputs=[SoVITS_dropdown, GPT_dropdown])
+            refresh_character_button.click(update_model_choices, [Character_dropdown], [Character_dropdown, GPT_dropdown, SoVITS_dropdown])
+            Character_dropdown.change(update_model_choices, [Character_dropdown], [Character_dropdown, GPT_dropdown, SoVITS_dropdown])
+        with gr.Row(elem_classes="align-bottom-row"):
+            with gr.Column(scale=12):
+                with gr.Row():
+                    ref_options = gr.CheckboxGroup(
+                        label=i18n("参考音频选项"),
+                        choices=[i18n("允许所有参考音频"), i18n("包含参考音频目录")],
+                        value=[],
+                        container=False,
+                    )
+                with gr.Row():
+                    role_filter_dropdown = gr.Dropdown(label=i18n("参考音频角色筛选"), choices=["全部"], value="全部", interactive=True, container=False)
+                    lang_filter_dropdown = gr.Dropdown(label=i18n("参考音频语种筛选"), choices=["全部"], value="全部", interactive=True, container=False)
+            refresh_wavs_button = gr.Button(i18n("刷新参考音频"), variant="primary", scale=4, elem_id="refresh_wavs")
+        with gr.Row():
+            wavs_dropdown_model = gr.Dropdown(
+                label=i18n("参考音频列表"),
+                choices=build_ref_audio_index(False, sovits_dropdown_value, gpt_dropdown_value, False, "全部", "全部", False),
+                value=None,
+                interactive=True,
+                scale=16,
+            )
+            def refresh_ref_audio_choices(options, gpt_sel, sovits_sel, filter_role, filter_lang):
+                opt = options or []
+                allow_all_label = i18n("允许所有参考音频")
+                include_ref_label = i18n("包含参考音频目录")
+                allow_all = allow_all_label in opt
+                include_ref = include_ref_label in opt
+                choices = build_ref_audio_index(allow_all, sovits_sel, gpt_sel, include_ref, filter_role, filter_lang, False)
+                roles = ["全部"] + sorted(list(ref_roles_set))
+                langs = ["全部"] + sorted(list(ref_langs_set))
+                return (
+                    {"__type__": "update", "choices": choices, "value": None},
+                    {"__type__": "update", "choices": roles},
+                    {"__type__": "update", "choices": langs},
+                )
+            refresh_wavs_button.click(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
+            ref_options.change(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
+            GPT_dropdown.change(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
+            SoVITS_dropdown.change(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
+            role_filter_dropdown.change(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
+            lang_filter_dropdown.change(
+                refresh_ref_audio_choices,
+                [ref_options, GPT_dropdown, SoVITS_dropdown, role_filter_dropdown, lang_filter_dropdown],
+                [wavs_dropdown_model, role_filter_dropdown, lang_filter_dropdown],
+            )
         gr.Markdown(html_center(i18n("*请上传并填写参考信息"), "h3"))
         with gr.Row():
             inp_ref = gr.Audio(label=i18n("请上传3~10秒内参考音频，超过会报错！"), type="filepath", scale=13)
@@ -1255,12 +1902,46 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                     )
                 )
                 prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="", lines=5, max_lines=5, scale=1)
+                info_character = gr.Textbox(label=i18n("角色名"), value="", lines=1, max_lines=1, scale=1)
+                info_emotion = gr.Textbox(label=i18n("情绪"), value="", lines=1, max_lines=1, scale=1)
+                info_remark = gr.Textbox(label=i18n("备注"), value="", lines=2, max_lines=2, scale=1)
+                save_info_button = gr.Button(value=i18n("保存音频标注数据"), variant="primary", elem_id="save_info", interactive=False)
+                baseline_state = gr.State({"prompt_text": "", "character": "", "emotion": "", "remark": ""})
+                
             with gr.Column(scale=14):
                 prompt_language = gr.Dropdown(
                     label=i18n("参考音频的语种"),
                     choices=list(dict_language.keys()),
                     value=i18n("中文"),
                 )
+                write_asr_list_checkbox = gr.Checkbox(
+                    label=i18n("写入训练标注列表"),
+                    value=True,
+                    visible=False,
+                    info=i18n(
+                        "保存信息时同步更新训练标注列表：按音频文件名匹配并覆盖文本/情绪/备注；原文件会生成 .bak 备份。关闭则仅写入音频元数据"
+                    ),
+                )
+                save_info_button.click(
+                    save_audio_metadata,
+                    [wavs_dropdown_model, info_character, info_emotion, info_remark, prompt_text, prompt_language, write_asr_list_checkbox],
+                    [],
+                )
+                wavs_dropdown_model.change(
+                    on_select_ref_audio,
+                    [wavs_dropdown_model, Character_dropdown],
+                    [inp_ref, prompt_text, info_character, info_emotion, info_remark, baseline_state, save_info_button, prompt_language],
+                )
+                def check_diff(pt, ch, em, rk, base):
+                    same = str(pt) == str(base.get("prompt_text", "")) and str(ch) == str(base.get("character", "")) and str(em) == str(base.get("emotion", "")) and str(rk) == str(base.get("remark", ""))
+                    if same:
+                        return {"__type__": "update", "interactive": False}
+                    else:
+                        return {"__type__": "update", "interactive": True}
+                prompt_text.change(check_diff, [prompt_text, info_character, info_emotion, info_remark, baseline_state], [save_info_button])
+                info_character.change(check_diff, [prompt_text, info_character, info_emotion, info_remark, baseline_state], [save_info_button])
+                info_emotion.change(check_diff, [prompt_text, info_character, info_emotion, info_remark, baseline_state], [save_info_button])
+                info_remark.change(check_diff, [prompt_text, info_character, info_emotion, info_remark, baseline_state], [save_info_button])
                 inp_refs = (
                     gr.File(
                         label=i18n(
@@ -1360,15 +2041,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
             #     phoneme=gr.Textbox(label=i18n("音素框"), value="")
             #     get_phoneme_button = gr.Button(i18n("目标文本转音素"), variant="primary")
         with gr.Row():
-            inference_button = gr.Button(value=i18n("合成语音"), variant="primary", size="lg", scale=25)
-            use_cuda_graph_checkbox = gr.Checkbox(
-                label="CUDA Graph " + i18n("加速"),
-                value=cuda_graph_supported,
-                interactive=True if torch.cuda.is_available() else False,
-                show_label=True,
-                scale=5,
-                visible=False,
-            )
+            inference_button = gr.Button(value=i18n("合成语音"), variant="primary", size="lg", scale=12, elem_id="inference_btn")
             output = gr.Audio(label=i18n("输出的语音"), scale=14)
 
         inference_button.click(
@@ -1390,7 +2063,6 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                 sample_steps,
                 if_sr_Checkbox,
                 pause_second_slider,
-                use_cuda_graph_checkbox,
             ],
             [output],
         )

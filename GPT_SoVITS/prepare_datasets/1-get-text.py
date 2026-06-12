@@ -126,13 +126,15 @@ if os.path.exists(txt_path) == False:
     }
     for line in lines[int(i_part) :: int(all_parts)]:
         try:
-            wav_name, spk_name, language, text = line.split("|")
-            # todo.append([name,text,"zh"])
+            parts = line.split("|")
+            if len(parts) < 4:
+                raise ValueError("list行列数不足，需至少4列：wav_path|speaker_name|language|text")
+            wav_name, spk_name, language, text = parts[:4]
             if language in language_v1_to_language_v2.keys():
                 todo.append([wav_name, text, language_v1_to_language_v2.get(language, language)])
             else:
                 print(f"\033[33m[Waring] The {language = } of {wav_name} is not supported for training.\033[0m")
-        except:
+        except Exception:
             print(line, traceback.format_exc())
 
     process(todo, res)
