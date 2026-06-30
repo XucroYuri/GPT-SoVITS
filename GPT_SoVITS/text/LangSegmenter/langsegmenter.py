@@ -87,7 +87,7 @@ class LangSegmenter():
         "en": "en",
     }
 
-    
+
     def getTexts(text):
         lang_splitter = LangSplitter(lang_map=LangSegmenter.DEFAULT_LANG_MAP)
         substr = lang_splitter.split_by_lang(text=text)
@@ -98,7 +98,7 @@ class LangSegmenter():
             dict_item = {'lang':item.lang,'text':item.text}
 
             # 处理短英文被识别为其他语言的问题
-            if full_en(dict_item['text']):  
+            if full_en(dict_item['text']):
                 dict_item['lang'] = 'en'
                 lang_list = merge_lang(lang_list,dict_item)
                 continue
@@ -165,7 +165,7 @@ class LangSegmenter():
             lang_list = merge_lang(lang_list,temp_item)
 
         return lang_list
-    
+
 
 if __name__ == "__main__":
     text = "MyGO?,你也喜欢まいご吗？"

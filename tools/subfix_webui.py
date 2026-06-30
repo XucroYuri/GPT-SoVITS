@@ -19,6 +19,7 @@ import gradio as gr
 import librosa
 import numpy as np
 import soundfile
+from tools.list_metadata import ListLine, format_list_line, parse_list_line
 
 g_json_key_text = ""
 g_json_key_path = ""
@@ -260,13 +261,19 @@ def b_save_json():
 def b_save_list():
     with open(g_load_file, "w", encoding="utf-8") as file:
         for data in g_data_json:
-            wav_path = data["wav_path"]
-            speaker_name = data["speaker_name"]
-            language = data["language"]
-            text = data["text"]
-            emotion = data.get("emotion", "")
-            remark = data.get("remark", "")
-            file.write(f"{wav_path}|{speaker_name}|{language}|{text}|{emotion}|{remark}".strip() + "\n")
+            file.write(
+                format_list_line(
+                    ListLine(
+                        wav_path=data["wav_path"],
+                        speaker_name=data["speaker_name"],
+                        language=data["language"],
+                        text=data["text"],
+                        emotion=data.get("emotion", ""),
+                        remark=data.get("remark", ""),
+                    )
+                )
+                + "\n"
+            )
 
 
 def b_load_json():
@@ -282,31 +289,19 @@ def b_load_list():
     with open(g_load_file, "r", encoding="utf-8") as source:
         data_list = source.readlines()
         for _ in data_list:
-            data = _.split("|")
-            if len(data) >= 6:
-                wav_path, speaker_name, language, text, emotion, remark = data[:6]
-                g_data_json.append(
-                    {
-                        "wav_path": wav_path,
-                        "speaker_name": speaker_name,
-                        "language": language,
-                        "text": text.strip(),
-                        "emotion": emotion.strip(),
-                        "remark": remark.strip(),
-                    }
-                )
-            elif len(data) == 4:
-                wav_path, speaker_name, language, text = data
-                g_data_json.append(
-                    {
-                        "wav_path": wav_path,
-                        "speaker_name": speaker_name,
-                        "language": language,
-                        "text": text.strip(),
-                        "emotion": "",
-                        "remark": "",
-                    }
-                )
+            item = parse_list_line(_)
+            if item is None:
+                continue
+            g_data_json.append(
+                {
+                    "wav_path": item.wav_path,
+                    "speaker_name": item.speaker_name,
+                    "language": item.language,
+                    "text": item.text,
+                    "emotion": item.emotion,
+                    "remark": item.remark,
+                }
+            )
         g_max_json_index = len(g_data_json) - 1
 
 def b_apply_global_character(character_name):
@@ -337,9 +332,12 @@ def b_load_file():
 
 
 def set_global(load_json, load_list, json_key_text, json_key_path, batch):
-    global g_json_key_text, g_json_key_path, g_load_file, g_load_format, g_batch
+    global g_json_key_text, g_json_key_path, g_load_file, g_load_format, g_batch, g_data_json, g_index, g_max_json_index
 
     g_batch = int(batch)
+    g_data_json = []
+    g_index = 0
+    g_max_json_index = 0
 
     if load_json != "None":
         g_load_format = "json"

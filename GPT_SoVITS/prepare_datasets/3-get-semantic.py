@@ -42,6 +42,7 @@ if version != "v3":
 else:
     from module.models import SynthesizerTrnV3 as SynthesizerTrn
 from tools.my_utils import clean_path
+from tools.list_metadata import parse_list_line
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 # from config import pretrained_s2G
@@ -105,10 +106,10 @@ if os.path.exists(semantic_path) == False:
     lines1 = []
     for line in lines[int(i_part) :: int(all_parts)]:
         try:
-            parts = line.split("|")
-            if len(parts) < 4:
+            item = parse_list_line(line)
+            if item is None:
                 raise ValueError("list行列数不足，需至少4列：wav_path|speaker_name|language|text")
-            wav_name = parts[0]
+            wav_name = item.wav_path
             wav_name = clean_path(wav_name)
             wav_name = os.path.basename(wav_name)
             name2go(wav_name, lines1)

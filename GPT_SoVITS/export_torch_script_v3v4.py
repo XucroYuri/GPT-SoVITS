@@ -438,7 +438,7 @@ class GPTSoVITSV3(torch.nn.Module):
 
         wav_gen = torch.cat(wav_gen_list, 2)
         return wav_gen[0][0][:wav_gen_length]
-    
+
 class GPTSoVITSV4(torch.nn.Module):
     def __init__(self, gpt_sovits_half, cfm, hifigan):
         super().__init__()
@@ -710,7 +710,7 @@ def export_1(ref_wav_path,ref_wav_text,version="v3"):
     else:
         sovits = get_sovits_weights("GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth")
         init_hifigan()
-    
+
 
     dict_s1 = torch.load("GPT_SoVITS/pretrained_models/s1v3.ckpt")
     raw_t2s = get_raw_t2s_model(dict_s1).to(device)
@@ -918,7 +918,7 @@ def export_1(ref_wav_path,ref_wav_text,version="v3"):
             hifigan_model_ = torch.jit.trace(hifigan_model, optimize=True, example_inputs=(cmf_res_rand,))
             hifigan_model_.save("onnx/ad/hifigan_model.pt")
             wav_gen = hifigan_model(cmf_res)
-        
+
         print("wav_gen:", wav_gen.shape, wav_gen.dtype)
         audio = wav_gen[0][0].cpu().detach().numpy()
 

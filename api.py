@@ -876,7 +876,7 @@ def get_tts_wav(
         if version not in {"v3", "v4"}:
             refers = []
             if is_v2pro:
-                sv_emb= [] 
+                sv_emb= []
                 if sv_cn_model == None:
                     init_sv_cn()
             if inp_refs:

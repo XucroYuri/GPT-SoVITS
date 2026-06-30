@@ -210,6 +210,14 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 vocal_path|speaker_name|language|text
 ```
 
+ProPlus 元数据流程同时兼容并可写入扩展格式:
+
+```
+vocal_path|speaker_name|language|text|emotion|remark
+```
+
+`emotion` 和 `remark` 仅用于标注管理、参考音频筛选、推理回填和复核；训练预处理只消费前 4 列。
+
 语言字典:
 
 - 'zh': 中文

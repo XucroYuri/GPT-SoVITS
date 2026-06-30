@@ -100,8 +100,8 @@ def check_details(path_list=None, is_train=False, is_dataset_processing=False):
         with open(list_path, "r", encoding="utf8") as f:
             line = f.readline().strip("\n").split("\n")
         parts = line[0].split("|")
-        if len(parts) < 1:
-            gr.Warning(i18n("List文件格式错误：至少需要1列"))
+        if len(parts) < 4:
+            gr.Warning(i18n("List文件格式错误：至少需要4列"))
             return
         wav_name = parts[0]
         wav_name = clean_path(wav_name)

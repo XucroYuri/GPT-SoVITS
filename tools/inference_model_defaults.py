@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
 
+DEFAULT_TOP_K = 15
+DEFAULT_TEXT_SPLIT_METHOD = "cut5"
+
+
 @dataclass(frozen=True)
 class WeightSelection:
     display_value: str

@@ -23,6 +23,7 @@ set "HF_ENDPOINT=https://hf-mirror.com"
 set "HF_HOME=%CD%\hf_download"
 set "TRANSFORMERS_CACHE=%CD%\tf_download"
 set "XFORMERS_FORCE_DISABLE_TRITON=1"
+set "GPT_SOVITS_PORTABLE_MODE=1"
 
 if not exist "logs\startup" mkdir "logs\startup"
 set "STAMP=%DATE:~-10%-%TIME%"

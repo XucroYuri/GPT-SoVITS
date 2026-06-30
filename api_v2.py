@@ -27,18 +27,18 @@ POST:
     "aux_ref_audio_paths": [],    # list.(optional) auxiliary reference audio paths for multi-speaker tone fusion
     "prompt_text": "",            # str.(optional) prompt text for the reference audio
     "prompt_lang": "",            # str.(required) language of the prompt text for the reference audio
-    "top_k": 5,                   # int. top k sampling
+    "top_k": 15,                  # int. top k sampling
     "top_p": 1,                   # float. top p sampling
     "temperature": 1,             # float. temperature for sampling
-    "text_split_method": "cut0",  # str. text split method, see text_segmentation_method.py for details.
+    "text_split_method": "cut5",  # str. text split method, see text_segmentation_method.py for details.
     "batch_size": 1,              # int. batch size for inference
     "batch_threshold": 0.75,      # float. threshold for batch splitting.
-    "split_bucket: True,          # bool. whether to split the batch into multiple buckets.
+    "split_bucket": True,         # bool. whether to split the batch into multiple buckets.
     "speed_factor":1.0,           # float. control the speed of the synthesized audio.
     "streaming_mode": False,      # bool. whether to return a streaming response.
     "seed": -1,                   # int. random seed for reproducibility.
     "parallel_infer": True,       # bool. whether to use parallel inference.
-    "repetition_penalty": 1.35    # float. repetition penalty for T2S model.
+    "repetition_penalty": 1.35,   # float. repetition penalty for T2S model.
     "sample_steps": 32,           # int. number of sampling steps for VITS model V3.
     "super_sampling": False,       # bool. whether to use super-sampling for audio when using VITS model V3.
 }
@@ -121,6 +121,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
 from io import BytesIO
 from tools.i18n.i18n import I18nAuto
+from tools.inference_model_defaults import DEFAULT_TEXT_SPLIT_METHOD, DEFAULT_TOP_K
 from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
 from GPT_SoVITS.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
 from pydantic import BaseModel
@@ -157,10 +158,10 @@ class TTS_Request(BaseModel):
     aux_ref_audio_paths: list = None
     prompt_lang: str = None
     prompt_text: str = ""
-    top_k: int = 5
+    top_k: int = DEFAULT_TOP_K
     top_p: float = 1
     temperature: float = 1
-    text_split_method: str = "cut5"
+    text_split_method: str = DEFAULT_TEXT_SPLIT_METHOD
     batch_size: int = 1
     batch_threshold: float = 0.75
     split_bucket: bool = True
@@ -267,7 +268,7 @@ def check_params(req: dict):
     streaming_mode: bool = req.get("streaming_mode", False)
     media_type: str = req.get("media_type", "wav")
     prompt_lang: str = req.get("prompt_lang", "")
-    text_split_method: str = req.get("text_split_method", "cut5")
+    text_split_method: str = req.get("text_split_method", DEFAULT_TEXT_SPLIT_METHOD)
 
     if ref_audio_path in [None, ""]:
         return JSONResponse(status_code=400, content={"message": "ref_audio_path is required"})
@@ -313,20 +314,20 @@ async def tts_handle(req: dict):
                 "aux_ref_audio_paths": [],    # list.(optional) auxiliary reference audio paths for multi-speaker synthesis
                 "prompt_text": "",            # str.(optional) prompt text for the reference audio
                 "prompt_lang": "",            # str.(required) language of the prompt text for the reference audio
-                "top_k": 5,                   # int. top k sampling
+                "top_k": 15,                  # int. top k sampling
                 "top_p": 1,                   # float. top p sampling
                 "temperature": 1,             # float. temperature for sampling
                 "text_split_method": "cut5",  # str. text split method, see text_segmentation_method.py for details.
                 "batch_size": 1,              # int. batch size for inference
                 "batch_threshold": 0.75,      # float. threshold for batch splitting.
-                "split_bucket: True,          # bool. whether to split the batch into multiple buckets.
+                "split_bucket": True,         # bool. whether to split the batch into multiple buckets.
                 "speed_factor":1.0,           # float. control the speed of the synthesized audio.
                 "fragment_interval":0.3,      # float. to control the interval of the audio fragment.
                 "seed": -1,                   # int. random seed for reproducibility.
                 "media_type": "wav",          # str. media type of the output audio, support "wav", "raw", "ogg", "aac".
                 "streaming_mode": False,      # bool. whether to return a streaming response.
                 "parallel_infer": True,       # bool.(optional) whether to use parallel inference.
-                "repetition_penalty": 1.35    # float.(optional) repetition penalty for T2S model.
+                "repetition_penalty": 1.35,   # float.(optional) repetition penalty for T2S model.
                 "sample_steps": 32,           # int. number of sampling steps for VITS model V3.
                 "super_sampling": False,       # bool. whether to use super-sampling for audio when using VITS model V3.
             }
@@ -391,10 +392,10 @@ async def tts_get_endpoint(
     aux_ref_audio_paths: list = None,
     prompt_lang: str = None,
     prompt_text: str = "",
-    top_k: int = 5,
+    top_k: int = DEFAULT_TOP_K,
     top_p: float = 1,
     temperature: float = 1,
-    text_split_method: str = "cut0",
+    text_split_method: str = DEFAULT_TEXT_SPLIT_METHOD,
     batch_size: int = 1,
     batch_threshold: float = 0.75,
     split_bucket: bool = True,

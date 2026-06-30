@@ -7,7 +7,7 @@ import traceback
 from funasr import AutoModel
 from tqdm import tqdm
 
-from model_store import asr_model_path
+from tools.asr.model_paths import asr_model_root, local_model_or_repo
 
 funasr_models = {}  # 存储模型避免重复加载
 
@@ -24,7 +24,7 @@ def only_asr(input_file, language, backend="fun-asr-nano"):
 
 def create_model(language="zh", **kwargs):
     backend = kwargs.get("backend", "fun-asr-nano")
-    asr_models_root = asr_model_path()
+    asr_models_root = asr_model_root()
 
     # For non-classic backends, route to multilingual models regardless of language
     if backend in ("fun-asr-nano", "sensevoice") and language != "yue":
@@ -56,26 +56,30 @@ def create_model(language="zh", **kwargs):
         funasr_models[cache_key] = model
         return model
 
-    local_vad = asr_models_root / "speech_fsmn_vad_zh-cn-16k-common-pytorch"
-    local_punc = asr_models_root / "punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
-    path_vad = str(local_vad) if local_vad.exists() else "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
-    path_punc = str(local_punc) if local_punc.exists() else "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
+    path_vad = local_model_or_repo(
+        asr_models_root,
+        "speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    )
+    path_punc = local_model_or_repo(
+        asr_models_root,
+        "punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+    )
     vad_model_revision = punc_model_revision = "v2.0.4"
 
     if language == "zh":
-        local_asr = asr_models_root / "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
-        path_asr = (
-            str(local_asr)
-            if local_asr.exists()
-            else "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+        path_asr = local_model_or_repo(
+            asr_models_root,
+            "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+            "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         )
         model_revision = "v2.0.4"
     elif language == "yue":
-        local_asr = asr_models_root / "speech_UniASR_asr_2pass-cantonese-CHS-16k-common-vocab1468-tensorflow1-online"
-        path_asr = (
-            str(local_asr)
-            if local_asr.exists()
-            else "iic/speech_UniASR_asr_2pass-cantonese-CHS-16k-common-vocab1468-tensorflow1-online"
+        path_asr = local_model_or_repo(
+            asr_models_root,
+            "speech_UniASR_asr_2pass-cantonese-CHS-16k-common-vocab1468-tensorflow1-online",
+            "iic/speech_UniASR_asr_2pass-cantonese-CHS-16k-common-vocab1468-tensorflow1-online",
         )
         path_vad = path_punc = None
         vad_model_revision = punc_model_revision = None

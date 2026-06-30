@@ -36,6 +36,7 @@ from transformers import AutoModelForMaskedLM, AutoTokenizer
 
 from tools.audio_sr import AP_BWE
 from tools.i18n.i18n import I18nAuto, scan_language_list
+from tools.inference_model_defaults import DEFAULT_TEXT_SPLIT_METHOD, DEFAULT_TOP_K
 from tools.my_utils import load_audio
 from tools.startup_check import require_existing_weight_path
 from TTS_infer_pack.text_segmentation_method import splits
@@ -306,7 +307,10 @@ class TTS_Config:
             configs: dict = self._load_configs(self.configs_path)
 
         assert isinstance(configs, dict)
-        version = "v2ProPlus"
+        portable_mode = os.environ.get("GPT_SOVITS_PORTABLE_MODE") == "1"
+        version = os.environ.get("version") or configs.get("custom", {}).get("version")
+        if not version:
+            version = "v2ProPlus" if portable_mode else "v2"
         assert version in ["v1", "v2", "v3", "v4", "v2Pro", "v2ProPlus"]
         self.default_configs[version] = configs.get(version, self.default_configs[version])
         self.configs: dict = configs.get("custom", deepcopy(self.default_configs[version]))
@@ -989,19 +993,19 @@ class TTS:
                     "aux_ref_audio_paths": [],    # list.(optional) auxiliary reference audio paths for multi-speaker tone fusion
                     "prompt_text": "",            # str.(optional) prompt text for the reference audio
                     "prompt_lang": "",            # str.(required) language of the prompt text for the reference audio
-                    "top_k": 5,                   # int. top k sampling
+                    "top_k": 15,                  # int. top k sampling
                     "top_p": 1,                   # float. top p sampling
                     "temperature": 1,             # float. temperature for sampling
-                    "text_split_method": "cut0",  # str. text split method, see text_segmentation_method.py for details.
+                    "text_split_method": "cut5",  # str. text split method, see text_segmentation_method.py for details.
                     "batch_size": 1,              # int. batch size for inference
                     "batch_threshold": 0.75,      # float. threshold for batch splitting.
-                    "split_bucket: True,          # bool. whether to split the batch into multiple buckets.
+                    "split_bucket": True,         # bool. whether to split the batch into multiple buckets.
                     "return_fragment": False,     # bool. step by step return the audio fragment.
                     "speed_factor":1.0,           # float. control the speed of the synthesized audio.
                     "fragment_interval":0.3,      # float. to control the interval of the audio fragment.
                     "seed": -1,                   # int. random seed for reproducibility.
                     "parallel_infer": True,       # bool. whether to use parallel inference.
-                    "repetition_penalty": 1.35    # float. repetition penalty for T2S model.
+                    "repetition_penalty": 1.35,   # float. repetition penalty for T2S model.
                     "sample_steps": 32,           # int. number of sampling steps for VITS model V3.
                     "super_sampling": False,       # bool. whether to use super-sampling for audio when using VITS model V3.
                 }
@@ -1016,10 +1020,10 @@ class TTS:
         aux_ref_audio_paths: list = inputs.get("aux_ref_audio_paths", [])
         prompt_text: str = inputs.get("prompt_text", "")
         prompt_lang: str = inputs.get("prompt_lang", "")
-        top_k: int = inputs.get("top_k", 5)
+        top_k: int = inputs.get("top_k", DEFAULT_TOP_K)
         top_p: float = inputs.get("top_p", 1)
         temperature: float = inputs.get("temperature", 1)
-        text_split_method: str = inputs.get("text_split_method", "cut0")
+        text_split_method: str = inputs.get("text_split_method", DEFAULT_TEXT_SPLIT_METHOD)
         batch_size = inputs.get("batch_size", 1)
         batch_threshold = inputs.get("batch_threshold", 0.75)
         speed_factor = inputs.get("speed_factor", 1.0)

@@ -90,24 +90,15 @@ conda activate GPTSoVits
 bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
 ```
 
-### Project-local model and cache paths
+### Project-local ASR model path
 
-By default, GPT-SoVITS keeps its pretrained assets inside the project workspace instead of relying on machine-global Hugging Face caches.
-
-- pretrained models: `GPT_SoVITS/pretrained_models`
-- ASR models: `tools/asr/models`
-- runtime cache: `.cache/`
-
-Optional project-scoped overrides:
+By default, local ASR models are loaded from `tools/asr/models`. You can override only the ASR model root with:
 
 ```bash
-export GPT_SOVITS_PRETRAINED_MODELS_DIR=/path/to/pretrained_models
 export GPT_SOVITS_ASR_MODELS_DIR=/path/to/asr_models
-export GPT_SOVITS_CACHE_ROOT=/path/to/project_cache
-export GPT_SOVITS_HF_ENDPOINT=https://hf-mirror.com
 ```
 
-These overrides are preferred over putting `HF_ENDPOINT`, `HF_HOME`, or `TRANSFORMERS_CACHE` into your global shell profile.
+The Windows portable launch scripts also set project-local `HF_HOME` and `TRANSFORMERS_CACHE` paths at startup.
 
 ### macOS
 
@@ -240,6 +231,14 @@ The TTS annotation .list file format:
 vocal_path|speaker_name|language|text
 
 ```
+
+The ProPlus metadata workflow also accepts and writes this extended form:
+
+```
+vocal_path|speaker_name|language|text|emotion|remark
+```
+
+`emotion` and `remark` are label/inference metadata for reference-audio filtering, backfill, and review. Training preprocessing consumes only the first four fields.
 
 Language dictionary:
 
@@ -497,8 +496,3 @@ Thankful to @Naozumi520 for providing the Cantonese training set and for the gui
 <a href="https://github.com/RVC-Boss/GPT-SoVITS/graphs/contributors" target="_blank">
   <img src="https://contrib.rocks/image?repo=RVC-Boss/GPT-SoVITS" />
 </a>
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=XucroYuri/GPT-SoVITS&type=Date)](https://star-history.com/#XucroYuri/GPT-SoVITS&Date)
-

@@ -1,8 +1,10 @@
 import os
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
 import sys
 
-os.environ["version"] = version = "v2ProPlus"
+portable_mode = os.environ.get("GPT_SOVITS_PORTABLE_MODE") == "1"
+if portable_mode:
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ["version"] = version = os.environ.get("version", "v2ProPlus" if portable_mode else "v2")
 now_dir = os.getcwd()
 sys.path.insert(0, now_dir)
 from tools.startup_bootstrap import apply_startup_patches

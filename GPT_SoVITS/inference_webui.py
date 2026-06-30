@@ -51,6 +51,7 @@ from tools.reference_audio_metadata import (
     iter_asr_list_files,
     read_asr_metadata_map,
     resolve_reference_character,
+    update_asr_list_metadata,
 )
 from tools.inference_model_defaults import resolve_weight_selection
 from tools.startup_check import require_existing_weight_path
@@ -373,7 +374,7 @@ def apply_text_corrections(text):
 
 load_corrections()
 
- 
+
 
 def build_ref_audio_index(allow_all=False, sovits_selected=None, gpt_selected=None, include_refdir=False, filter_role="全部", filter_lang="全部", add_tail=True):
     global ref_audio_map, ref_text_map, ref_key_map
@@ -623,41 +624,10 @@ def save_audio_metadata(label, character, emotion, remark, prompt_text, prompt_l
         _write_meta(exp, key, character, emotion, remark, prompt_text)
         if write_asr_list:
             base = os.path.join(now_dir, "output", "asr_opt", exp)
-            target = None
             for path in iter_asr_list_files(base):
-                target = str(path)
-                break
-            if target:
                 try:
-                    bak = target + ".bak"
-                    with open(target, "r", encoding="utf-8", errors="ignore") as fp:
-                        lines = fp.read().strip("\n").split("\n")
-                    with open(bak, "w", encoding="utf-8") as bp:
-                        bp.write("\n".join(lines))
-                    updated = False
-                    new_lines = []
-                    for line in lines:
-                        if "|" not in line:
-                            new_lines.append(line)
-                            continue
-                        parts = line.split("|")
-                        if len(parts) < 4:
-                            new_lines.append(line)
-                            continue
-                        n = os.path.basename(parts[0])
-                        if n == key:
-                            while len(parts) < 6:
-                                parts.append("")
-                            parts[3] = str(prompt_text or parts[3])
-                            parts[4] = str(emotion or parts[4])
-                            parts[5] = str(remark or parts[5])
-                            new_lines.append("|".join(parts))
-                            updated = True
-                        else:
-                            new_lines.append(line)
-                    if updated:
-                        with open(target, "w", encoding="utf-8") as wp:
-                            wp.write("\n".join(new_lines))
+                    if update_asr_list_metadata(path, key, text=prompt_text, emotion=emotion, remark=remark):
+                        break
                 except Exception:
                     pass
     elif info and info.get("origin") == "refdir":
@@ -1907,7 +1877,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
                 info_remark = gr.Textbox(label=i18n("备注"), value="", lines=2, max_lines=2, scale=1)
                 save_info_button = gr.Button(value=i18n("保存音频标注数据"), variant="primary", elem_id="save_info", interactive=False)
                 baseline_state = gr.State({"prompt_text": "", "character": "", "emotion": "", "remark": ""})
-                
+
             with gr.Column(scale=14):
                 prompt_language = gr.Dropdown(
                     label=i18n("参考音频的语种"),

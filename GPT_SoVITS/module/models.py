@@ -1046,8 +1046,8 @@ class CFM(torch.nn.Module):
                                     use_grad_ckpt=False,
                                     drop_audio_cond=True,
                                     drop_text=True,
-                                    infer=True, 
-                                    text_cache=text_cfg_cache, 
+                                    infer=True,
+                                    text_cache=text_cfg_cache,
                                     dt_cache=dt_cache
                 )
                 neg = neg.transpose(2, 1)

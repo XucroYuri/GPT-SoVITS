@@ -1,8 +1,11 @@
 import os
 
+from tools.asr.model_paths import asr_model_root
+
 
 def check_fw_local_models():
     """Return Faster Whisper choices, marking locally available models."""
+    root = asr_model_root()
     model_size_list = [
         "tiny",
         "tiny.en",
@@ -19,7 +22,7 @@ def check_fw_local_models():
         "large-v3-turbo",
     ]
     for i, size in enumerate(model_size_list):
-        if os.path.exists(f"tools/asr/models/faster-whisper-{size}"):
+        if os.path.exists(root / f"faster-whisper-{size}"):
             model_size_list[i] = size + "-local"
     return model_size_list
 

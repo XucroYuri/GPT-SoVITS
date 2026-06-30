@@ -26,6 +26,7 @@ import librosa
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 from tools.my_utils import load_audio, clean_path
+from tools.list_metadata import parse_list_line
 
 # from config import cnhubert_base_path
 # cnhubert.cnhubert_base_path=cnhubert_base_path
@@ -110,10 +111,10 @@ with open(inp_text, "r", encoding="utf8") as f:
 
 for line in lines[int(i_part) :: int(all_parts)]:
     try:
-        parts = line.split("|")
-        if len(parts) < 4:
+        item = parse_list_line(line)
+        if item is None:
             raise ValueError("list行列数不足，需至少4列：wav_path|speaker_name|language|text")
-        wav_name, spk_name, language, text = parts[:4]
+        wav_name = item.wav_path
         wav_name = clean_path(wav_name)
         if inp_wav_dir != "" and inp_wav_dir != None:
             wav_name = os.path.basename(wav_name)
