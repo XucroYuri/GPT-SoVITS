@@ -362,6 +362,13 @@ python webui.py
 
 3. 从 [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) 下载 V2Pro 预训练模型 (`v2Pro/s2Dv2Pro.pth`, `v2Pro/s2Gv2Pro.pth`, `v2Pro/s2Dv2ProPlus.pth`, `v2Pro/s2Gv2ProPlus.pth`, 和 `sv/pretrained_eres2netv2w24s4ep4.ckpt`), 并放入 `GPT_SoVITS/pretrained_models` 目录.
 
+   V2Pro 系列包含两套兼容的训练底模组合:
+
+   | 版本 | GPT / semantic 模型 | SoVITS-G 模型 | SoVITS-D 模型 | 说话人验证模型 |
+   | --- | --- | --- | --- | --- |
+   | v2Pro | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2Pro.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
+   | v2ProPlus | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
+
 ## 待办事项清单
 
 - [x] **高优先级:**
