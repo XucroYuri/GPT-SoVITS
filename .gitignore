@@ -4,6 +4,7 @@ __pycache__
 *.pyc
 env
 runtime
+py312/
 .idea
 output
 logs
@@ -11,6 +12,8 @@ SoVITS_weights*/
 GPT_weights*/
 TEMP
 weight.json
+deploy.env.bat
+*.backup-*
 ffmpeg*
 ffprobe*
 cfg.json
