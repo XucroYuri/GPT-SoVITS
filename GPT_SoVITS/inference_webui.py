@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 按中英混合识别
 按日英混合识别
@@ -8,6 +10,11 @@
 """
 import psutil
 import os
+
+# 确保仓库根在 sys.path, 使 from tools.xxx 可用 (兼容直接运行此脚本或经 webui.py 启动)
+_now_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _now_dir not in __import__('sys').path:
+    __import__('sys').path.insert(0, _now_dir)
 
 def set_high_priority():
     """把当前 Python 进程设为 HIGH_PRIORITY_CLASS"""
@@ -27,6 +34,7 @@ import re
 import sys
 import traceback
 import warnings
+from pathlib import Path
 
 import torch
 import torchaudio
@@ -306,7 +314,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
                 "choices": [4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
             },
             {"__type__": "update", "visible": visible_inp_refs},
-            {"__type__": "update", "value": False, "interactive": True if model_version not in v3v4set else False},
+            {"__type__": "update", "value": False, "interactive": True if model_version not in v3v4set else False, "visible": model_version not in v3v4set},
             {"__type__": "update", "visible": True if model_version == "v3" else False},
             {"__type__": "update", "value": i18n("模型加载中，请等待"), "interactive": False},
         )
@@ -388,7 +396,7 @@ def change_sovits_weights(sovits_path, prompt_language=None, text_language=None)
             "choices": [4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
         },
         {"__type__": "update", "visible": visible_inp_refs},
-        {"__type__": "update", "value": False, "interactive": True if model_version not in v3v4set else False},
+        {"__type__": "update", "value": False, "interactive": True if model_version not in v3v4set else False, "visible": model_version not in v3v4set},
         {"__type__": "update", "visible": True if model_version == "v3" else False},
         {"__type__": "update", "value": i18n("合成语音"), "interactive": True},
     )
@@ -851,9 +859,9 @@ def get_tts_wav(
     if not ref_free:
         with torch.no_grad():
             wav16k, sr = librosa.load(ref_wav_path, sr=16000)
-            if wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000:
-                gr.Warning(i18n("参考音频在3~10秒范围外，请更换！"))
-                raise OSError(i18n("参考音频在3~10秒范围外，请更换！"))
+            ref_duration = wav16k.shape[0] / 16000
+            if ref_duration < 3 or ref_duration > 10:
+                gr.Warning(i18n(f"参考音频时长 {ref_duration:.1f} 秒，超出推荐的 3~10 秒范围，可能影响合成质量"))
             wav16k = torch.from_numpy(wav16k)
             if is_half == True:
                 wav16k = wav16k.half().to(device)
@@ -1191,7 +1199,7 @@ def process_text(texts):
 
 
 def html_center(text, label="p"):
-    return f"""<div style="text-align: center; margin: 100; padding: 50;">
+    return f"""<div style="text-align: center; margin: 8px 0; padding: 4px 0;">
                 <{label} style="margin: 0; padding: 0;">{text}</{label}>
                 </div>"""
 
@@ -1200,6 +1208,264 @@ def html_left(text, label="p"):
     return f"""<div style="text-align: left; margin: 0; padding: 0;">
                 <{label} style="margin: 0; padding: 0;">{text}</{label}>
                 </div>"""
+
+
+# ===================== 训练角色选择 / 训练样本浏览 辅助函数 =====================
+def scan_model_names() -> list[str]:
+    """扫描 logs/ 目录获取所有训练角色名（含 2-name2text.txt 的子目录）。"""
+    from config import exp_root
+    import os
+
+    root = Path(exp_root)
+    if not root.exists():
+        return []
+    return sorted(
+        [
+            d.name
+            for d in root.iterdir()
+            if d.is_dir() and (d / "2-name2text.txt").exists()
+        ]
+    )
+
+
+def refresh_model_dropdown():
+    """刷新模型下拉框：返回 gr.Dropdown 更新（choices=全部模型名, value=首个）。
+
+    供 app.load 和「刷新模型列表」按钮使用。
+    注意：必须返回 gr.Dropdown(...) 而非裸 list——裸 list 会被 Gradio 当作
+    dropdown 的 value（多选），导致级联的 on_model_name_change 收到 list 而非 str。
+    """
+    names = scan_model_names()
+    return gr.Dropdown(choices=names, value=names[0] if names else "")
+
+
+def _coerce_single(value):
+    """把可能被 Gradio 包装成 list/tuple 的单值还原为 str。"""
+    if isinstance(value, (list, tuple)):
+        return str(value[0]) if value else ""
+    return str(value) if value is not None else ""
+
+
+
+def _read_name2text_for_webui(logs_dir: Path) -> dict[str, dict[str, str]]:
+    """读取 2-name2text.txt（WebUI 版，与 api_v2.py 的 _read_name2text 逻辑一致）。
+
+    返回 {wav_name: {"text": ..., "lang": ...}}，同时以 stem 建索引。
+    """
+    path = logs_dir / "2-name2text.txt"
+    if not path.exists():
+        return {}
+    output: dict[str, dict[str, str]] = {}
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        wav_name = parts[0].strip()
+        text = parts[3].strip()
+        if wav_name and text:
+            entry = {"text": text, "lang": "zh"}
+            output[wav_name] = entry
+            output[Path(wav_name).stem] = entry
+    return output
+
+
+def _read_emotion_map_for_webui(model_name: str) -> dict[str, str]:
+    """读取训练数据的 emotion，返回 {audio_name|stem: emotion}。
+
+    兼容新旧两种 emotion 数据源:
+    1. 旧: ASR 标注 .list 第5列 (output/asr_opt/<model_name>/*.list)
+    2. 新: logs/<model_name>/audio_metadata.json (推理WebUI回写的元数据)
+    合并两者, audio_metadata.json 优先(推理时回写的更新)。
+    """
+    from tools.list_metadata import parse_list_line
+    from config import exp_root
+
+    emotion_map: dict[str, str] = {}
+
+    def _add(name: str, emotion: str):
+        if name and emotion:
+            emotion_map[name] = emotion
+            emotion_map[Path(name).stem] = emotion
+
+    # 源1: .list (旧, ASR 标注)
+    list_dir = Path("output") / "asr_opt" / model_name
+    if list_dir.exists():
+        for list_path in sorted(list_dir.glob("*.list")):
+            try:
+                for line in list_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    item = parse_list_line(line)
+                    if item is None or not item.emotion:
+                        continue
+                    _add(os.path.basename(item.wav_path.strip("\"'")), item.emotion)
+            except Exception:
+                continue
+
+    # 源2: audio_metadata.json (新, 推理WebUI回写; 优先级高, 覆盖源1)
+    meta_path = Path(exp_root) / model_name / "audio_metadata.json"
+    if meta_path.exists():
+        try:
+            import json
+            meta = json.loads(meta_path.read_text(encoding="utf-8", errors="ignore"))
+            for name, info in meta.items():
+                if isinstance(info, dict) and info.get("emotion"):
+                    _add(name, info["emotion"])
+        except Exception:
+            pass
+
+    return emotion_map
+
+
+def on_model_name_change(model_name: str):
+    """模型名变化时：加载训练样本 + 自动匹配权重 + 自动引用首样本为参考。
+
+    返回: [样本下拉, GPT下拉, SoVITS下拉, 参考音频, 参考文本, 情绪/括注]
+    一次性联动全部字段, 不依赖 ref_sample_dropdown.change 的级联触发
+    (app.load 设置 dropdown value 后 Gradio 不一定触发 .change)。
+    """
+    model_name = _coerce_single(model_name)
+    if not model_name:
+        return gr.Dropdown(choices=[], value=""), gr.Dropdown(choices=[], value=""), gr.Dropdown(choices=[], value=""), None, "", ""
+    from config import exp_root
+
+    # 1. 加载训练样本
+    logs_dir = Path(exp_root) / model_name
+    wav_dir = logs_dir / "5-wav32k"
+    samples: list[tuple[str, str]] = []
+    if wav_dir.exists():
+        name2text = _read_name2text_for_webui(logs_dir)
+        emotion_map = _read_emotion_map_for_webui(model_name)
+        for f in sorted(wav_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in (".wav", ".mp3", ".flac"):
+                text = name2text.get(f.name, {}).get("text", "") or name2text.get(f.stem, {}).get("text", "")
+                emotion = emotion_map.get(f.name, "") or emotion_map.get(f.stem, "")
+                label = f"{f.name}"
+                if text:
+                    label += f" | {text[:30]}"
+                if emotion:
+                    label += f" | 【{emotion}】"
+                samples.append((label, str(f)))
+    choices = [s[0] for s in samples]
+    # 2. 自动匹配 GPT/SoVITS 权重（epoch 最接近 8/15）
+    gpt_dd, sovits_dd = auto_match_weights_for_model(model_name)
+    # 3. 自动引用首样本为参考音频+文本+情绪(避免依赖级联触发)
+    if samples:
+        first_audio, first_text, first_emotion = on_ref_sample_change(samples[0][0], model_name)
+    else:
+        first_audio, first_text, first_emotion = None, "", ""
+    return gr.Dropdown(choices=choices, value=choices[0] if choices else ""), gpt_dd, sovits_dd, first_audio, first_text, first_emotion
+
+
+def on_ref_sample_change(sample_label: str, model_name: str):
+    """训练样本选择变化时，直接引用为参考音频 + 填充参考文本 + 情绪/括注。
+
+    切换「训练样本音频」下拉框即自动联动, 无需额外按钮。
+    用户手动清空参考音频/文本/情绪则视为自定义输入, 不被本函数干扰
+    （Gradio change 仅在 dropdown 变化时触发, 手动改文本框不会重置）。
+
+    返回: [参考音频(inp_ref), 参考文本(prompt_text), 情绪/括注(ref_emotion_text)]
+    """
+    sample_label = _coerce_single(sample_label)
+    model_name = _coerce_single(model_name)
+    if not sample_label or not model_name:
+        return None, "", ""
+    from config import exp_root
+
+    wav_name = sample_label.split(" | ")[0]
+    audio_path = Path(exp_root) / model_name / "5-wav32k" / wav_name
+    logs_dir = Path(exp_root) / model_name
+    name2text = _read_name2text_for_webui(logs_dir)
+    emotion_map = _read_emotion_map_for_webui(model_name)
+    text = name2text.get(wav_name, {}).get("text", "") or name2text.get(Path(wav_name).stem, {}).get("text", "")
+    emotion = emotion_map.get(wav_name, "") or emotion_map.get(Path(wav_name).stem, "")
+    audio_out = str(audio_path) if audio_path.exists() else None
+    return audio_out, text, emotion
+
+
+def _scan_model_weights_for_webui() -> dict[str, dict[str, list[str]]]:
+    """扫描权重目录（WebUI 版），按 exp_name 分组。"""
+    from config import GPT_weight_root, SoVITS_weight_root
+
+    grouped: dict[str, dict[str, list[str]]] = {}
+    for root in GPT_weight_root:
+        root_path = Path(root)
+        if not root_path.exists():
+            continue
+        for f in root_path.iterdir():
+            if f.is_file() and f.suffix == ".ckpt":
+                name = re.split(r"-e\d+", f.stem, flags=re.IGNORECASE)[0]
+                grouped.setdefault(name, {"gpt": [], "sovits": []})
+                grouped[name]["gpt"].append(f"{root}/{f.name}")
+    for root in SoVITS_weight_root:
+        root_path = Path(root)
+        if not root_path.exists():
+            continue
+        for f in root_path.iterdir():
+            if f.is_file() and f.suffix == ".pth":
+                name = re.split(r"_e\d+_s\d+", f.stem, flags=re.IGNORECASE)[0]
+                grouped.setdefault(name, {"gpt": [], "sovits": []})
+                grouped[name]["sovits"].append(f"{root}/{f.name}")
+    return grouped
+
+
+def _extract_epoch_from_weight(weight_path: str, kind: str) -> int | None:
+    """从权重文件名提取 epoch 数字。
+
+    kind='gpt':    '<exp>-e10.ckpt'    -> 10
+    kind='sovits': '<exp>_e12_s180.pth' -> 12
+    """
+    name = Path(weight_path).name
+    pattern = r"-e(\d+)" if kind == "gpt" else r"_e(\d+)_s\d+"
+    m = re.search(pattern, name, flags=re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def _pick_weight_by_epoch(weights: list[str], target_epoch: int) -> str | None:
+    """从权重列表中选 epoch 最接近 target_epoch 的（平手取较小 epoch）。
+
+    匹配训练 WebUI 的推荐: GPT 目标 8 (total_epoch 默认 8), SoVITS 目标 15
+    (total_epoch 默认 15)。无法提取 epoch 时退化为列表第一个。
+    """
+    if not weights:
+        return None
+    best = None
+    best_diff = None
+    for w in weights:
+        # kind 由文件扩展名推断
+        kind = "gpt" if w.endswith(".ckpt") else "sovits"
+        ep = _extract_epoch_from_weight(w, kind)
+        if ep is None:
+            continue
+        diff = abs(ep - target_epoch)
+        if best_diff is None or diff < best_diff or (diff == best_diff and ep < (best_ep or 0)):
+            best = w
+            best_diff = diff
+            best_ep = ep
+    return best or weights[0]
+
+
+# GPT/SoVITS 自动匹配权重的目标 epoch（对应训练 WebUI 的默认 total_epoch）
+_GPT_TARGET_EPOCH = 8
+_SOVITS_TARGET_EPOCH = 15
+
+
+def auto_match_weights_for_model(model_name: str):
+    """选中模型名时自动匹配最佳 GPT/SoVITS 权重（按目标 epoch 最近匹配）。
+
+    返回 (gpt_dropdown_update, sovits_dropdown_update):
+    - choices 只含该模型对应的权重(过滤掉其它角色)
+    - value 自动选中 epoch 最接近 8/15 的权重
+    真正的权重切换由已绑定的 GPT_dropdown.change / SoVITS_dropdown.change
+    在 value 变化时自动触发。
+    """
+    if not model_name:
+        return gr.Dropdown(choices=[], value=""), gr.Dropdown(choices=[], value="")
+    weights = _scan_model_weights_for_webui()
+    model_weights = weights.get(model_name, {"gpt": [], "sovits": []})
+    gpt_list = sorted(model_weights["gpt"])
+    sovits_list = sorted(model_weights["sovits"])
+    gpt_best = _pick_weight_by_epoch(gpt_list, _GPT_TARGET_EPOCH)
+    sovits_best = _pick_weight_by_epoch(sovits_list, _SOVITS_TARGET_EPOCH)
+    return gr.Dropdown(choices=gpt_list, value=gpt_best), gr.Dropdown(choices=sovits_list, value=sovits_best)
 
 
 with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css) as app:
@@ -1212,87 +1478,107 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
     )
     with gr.Group():
         gr.Markdown(html_center(i18n("模型切换"), "h3"))
+        # 模型名(实验名) 是 GPT/SoVITS 的上游选择: 选角色 -> 自动匹配权重
+        with gr.Row():
+            model_name_dropdown = gr.Dropdown(
+                label=i18n("模型名（训练实验名）"),
+                choices=[],
+                value="",
+                interactive=True,
+                scale=20,
+            )
+            refresh_models_btn = gr.Button(i18n("刷新模型列表"), variant="primary", scale=8)
         with gr.Row():
             GPT_dropdown = gr.Dropdown(
                 label=i18n("GPT模型列表"),
                 choices=sorted(GPT_names, key=custom_sort_key),
                 value=gpt_path,
                 interactive=True,
-                scale=14,
+                scale=10,
             )
             SoVITS_dropdown = gr.Dropdown(
                 label=i18n("SoVITS模型列表"),
                 choices=sorted(SoVITS_names, key=custom_sort_key),
                 value=sovits_path,
                 interactive=True,
-                scale=14,
+                scale=10,
             )
-            refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary", scale=14)
+            refresh_button = gr.Button(i18n("刷新模型路径"), variant="primary", scale=8)
             refresh_button.click(fn=change_choices, inputs=[], outputs=[SoVITS_dropdown, GPT_dropdown])
+    with gr.Group():
         gr.Markdown(html_center(i18n("*请上传并填写参考信息"), "h3"))
+        # 训练样本下拉 + 无参考文本开关: 入口与输出聚合
+        # ref_text_free 与样本下拉功能局部互斥(勾选后参考文本无效), 故同区呈现
         with gr.Row():
-            inp_ref = gr.Audio(label=i18n("请上传3~10秒内参考音频，超过会报错！"), type="filepath", scale=13)
-            with gr.Column(scale=13):
-                ref_text_free = gr.Checkbox(
-                    label=i18n("开启无参考文本模式。不填参考文本亦相当于开启。")
-                    + i18n("v3暂不支持该模式，使用了会报错。"),
-                    value=False,
-                    interactive=True if model_version not in v3v4set else False,
-                    show_label=True,
-                    scale=1,
-                )
-                gr.Markdown(
-                    html_left(
-                        i18n("使用无参考文本模式时建议使用微调的GPT")
-                        + "<br>"
-                        + i18n("听不清参考音频说的啥(不晓得写啥)可以开。开启后无视填写的参考文本。")
-                    )
-                )
-                prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="", lines=5, max_lines=5, scale=1)
-            with gr.Column(scale=14):
+            ref_sample_dropdown = gr.Dropdown(
+                label=i18n("训练样本音频（选中即自动引用为参考音频）"),
+                choices=[],
+                value="",
+                interactive=True,
+                scale=20,
+            )
+            ref_text_free = gr.Checkbox(
+                label=i18n("无参考文本模式（勾选后忽略参考文本，仅用参考音频音色）"),
+                value=False,
+                interactive=True if model_version not in v3v4set else False,
+                show_label=True,
+                scale=8,
+                # v3/v4 不支持该模式: 代码层直接隐藏, 避免用户误操作报错
+                visible=model_version not in v3v4set,
+            )
+        with gr.Row():
+            inp_ref = gr.Audio(label=i18n("请上传参考音频（推荐3~10秒）"), type="filepath", scale=10)
+            with gr.Column(scale=10):
                 prompt_language = gr.Dropdown(
                     label=i18n("参考音频的语种"),
                     choices=list(dict_language.keys()),
                     value=i18n("中文"),
                 )
-                inp_refs = (
-                    gr.File(
-                        label=i18n(
-                            "可选项：通过拖拽多个文件上传多个参考音频（建议同性），平均融合他们的音色。如不填写此项，音色由左侧单个参考音频控制。如是微调模型，建议参考音频全部在微调训练集音色内，底模不用管。"
-                        ),
-                        file_count="multiple",
-                    )
-                    if model_version not in v3v4set
-                    else gr.File(
-                        label=i18n(
-                            "可选项：通过拖拽多个文件上传多个参考音频（建议同性），平均融合他们的音色。如不填写此项，音色由左侧单个参考音频控制。如是微调模型，建议参考音频全部在微调训练集音色内，底模不用管。"
-                        ),
-                        file_count="multiple",
-                        visible=False,
-                    )
+                prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="", lines=3, max_lines=3)
+                ref_emotion_text = gr.Textbox(
+                    label=i18n("情绪/括注（来自训练样本，无数据留空）"),
+                    value="",
+                    interactive=False,
                 )
-                sample_steps = (
-                    gr.Radio(
-                        label=i18n("采样步数,如果觉得电,提高试试,如果觉得慢,降低试试"),
-                        value=32 if model_version == "v3" else 8,
-                        choices=[4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
-                        visible=True,
-                    )
-                    if model_version in v3v4set
-                    else gr.Radio(
-                        label=i18n("采样步数,如果觉得电,提高试试,如果觉得慢,降低试试"),
-                        choices=[4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
-                        visible=False,
-                        value=32 if model_version == "v3" else 8,
-                    )
-                )
-                if_sr_Checkbox = gr.Checkbox(
-                    label=i18n("v3输出如果觉得闷可以试试开超分"),
-                    value=False,
-                    interactive=True,
-                    show_label=True,
-                    visible=False if model_version != "v3" else True,
-                )
+        # 多参考文件 + v3采样参数: 独立行(满宽), 不参与主行高度对齐
+        inp_refs = (
+            gr.File(
+                label=i18n(
+                    "可选项：通过拖拽多个文件上传多个参考音频（建议同性），平均融合他们的音色。如不填写此项，音色由左侧单个参考音频控制。如是微调模型，建议参考音频全部在微调训练集音色内，底模不用管。"
+                ),
+                file_count="multiple",
+            )
+            if model_version not in v3v4set
+            else gr.File(
+                label=i18n(
+                    "可选项：通过拖拽多个文件上传多个参考音频（建议同性），平均融合他们的音色。如不填写此项，音色由左侧单个参考音频控制。如是微调模型，建议参考音频全部在微调训练集音色内，底模不用管。"
+                ),
+                file_count="multiple",
+                visible=False,
+            )
+        )
+        sample_steps = (
+            gr.Radio(
+                label=i18n("采样步数,如果觉得电,提高试试,如果觉得慢,降低试试"),
+                value=32 if model_version == "v3" else 8,
+                choices=[4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
+                visible=True,
+            )
+            if model_version in v3v4set
+            else gr.Radio(
+                label=i18n("采样步数,如果觉得电,提高试试,如果觉得慢,降低试试"),
+                choices=[4, 8, 16, 32, 64, 128] if model_version == "v3" else [4, 8, 16, 32],
+                visible=False,
+                value=32 if model_version == "v3" else 8,
+            )
+        )
+        if_sr_Checkbox = gr.Checkbox(
+            label=i18n("v3输出如果觉得闷可以试试开超分"),
+            value=False,
+            interactive=True,
+            show_label=True,
+            visible=False if model_version != "v3" else True,
+        )
         gr.Markdown(html_center(i18n("*请填写需要合成的目标文本和语种模式"), "h3"))
         with gr.Row():
             with gr.Column(scale=13):
@@ -1406,6 +1692,26 @@ with gr.Blocks(title="GPT-SoVITS WebUI", analytics_enabled=False, js=js, css=css
             ],
         )
         GPT_dropdown.change(change_gpt_weights, [GPT_dropdown], [])
+
+        # ===== 新增事件绑定：训练角色选择 / 样本浏览 =====
+        refresh_models_btn.click(
+            fn=refresh_model_dropdown,
+            inputs=[],
+            outputs=[model_name_dropdown],
+        )
+        model_name_dropdown.change(
+            fn=on_model_name_change,
+            inputs=[model_name_dropdown],
+            outputs=[ref_sample_dropdown, GPT_dropdown, SoVITS_dropdown, inp_ref, prompt_text, ref_emotion_text],
+        )
+        ref_sample_dropdown.change(
+            fn=on_ref_sample_change,
+            inputs=[ref_sample_dropdown, model_name_dropdown],
+            outputs=[inp_ref, prompt_text, ref_emotion_text],
+        )
+        # 页面加载时自动扫描模型列表
+        app.load(fn=refresh_model_dropdown, inputs=[], outputs=[model_name_dropdown])
+
 
         # gr.Markdown(value=i18n("文本切分工具。太长的文本合成出来效果不一定好，所以太长建议先切。合成会根据文本的换行分开合成再拼起来。"))
         # with gr.Row():
