@@ -1,4 +1,9 @@
 import os
+import sys
+
+now_dir = os.getcwd()
+sys.path.append(now_dir)
+from GPT_SoVITS.process_ckpt import get_sovits_version_from_path_fast
 
 inp_text = os.environ.get("inp_text")
 exp_name = os.environ.get("exp_name")
@@ -10,30 +15,26 @@ opt_dir = os.environ.get("opt_dir")
 pretrained_s2G = os.environ.get("pretrained_s2G")
 s2config_path = os.environ.get("s2config_path")
 
-if os.path.exists(pretrained_s2G):
-    ...
-else:
+if not os.path.exists(pretrained_s2G):
     raise FileNotFoundError(pretrained_s2G)
-# version=os.environ.get("version","v2")
-size = os.path.getsize(pretrained_s2G)
-if size < 82978 * 1024:
-    version = "v1"
-elif size < 100 * 1024 * 1024:
-    version = "v2"
-elif size < 103520 * 1024:
-    version = "v1"
-elif size < 700 * 1024 * 1024:
-    version = "v2"
-else:
-    version = "v3"
+try:
+    version = get_sovits_version_from_path_fast(pretrained_s2G)[1]
+except Exception:
+    size = os.path.getsize(pretrained_s2G)
+    if size < 82978 * 1024:
+        version = "v1"
+    elif size < 100 * 1024 * 1024:
+        version = "v2"
+    elif size < 103520 * 1024:
+        version = "v1"
+    elif size < 700 * 1024 * 1024:
+        version = "v2"
+    else:
+        version = "v3"
 import torch
 
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
 import traceback
-import sys
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
 import logging
 import utils
 
