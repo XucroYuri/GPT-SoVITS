@@ -2,6 +2,10 @@ import os
 import re
 import sys
 
+from tools.startup_bootstrap import apply_startup_patches
+
+apply_startup_patches()
+
 import torch
 
 from tools.i18n.i18n import I18nAuto
@@ -77,7 +81,7 @@ GPT_weight_version2root = {
 
 def custom_sort_key(s):
     # 使用正则表达式提取字符串中的数字部分和非数字部分
-    parts = re.split("(\d+)", s)
+    parts = re.split(r"(\d+)", s)
     # 将数字部分转换为整数，非数字部分保持不变
     parts = [int(part) if part.isdigit() else part for part in parts]
     return parts
@@ -144,8 +148,7 @@ webui_port_subfix = 9871
 
 api_port = 9880
 
-
-# Thanks to the contribution of @Karasukaigan and @XXXXRT666
+#Thanks to the contribution of @Karasukaigan and @XXXXRT666
 def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, float]:
     cpu = torch.device("cpu")
     cuda = torch.device(f"cuda:{idx}")
@@ -158,13 +161,10 @@ def get_device_dtype_sm(idx: int) -> tuple[torch.device, torch.dtype, float, flo
     mem_gb = mem_bytes / (1024**3) + 0.4
     major, minor = capability
     sm_version = major + minor / 10.0
-    is_16_series = bool(re.search(r"16\d{2}", name)) and sm_version == 7.5
-    if mem_gb < 4 or sm_version < 5.3:
-        return cpu, torch.float32, 0.0, 0.0
-    if sm_version == 6.1 or is_16_series == True:
-        return cuda, torch.float32, sm_version, mem_gb
-    if sm_version > 6.1:
-        return cuda, torch.float16, sm_version, mem_gb
+    is_16_series = bool(re.search(r"16\d{2}", name))and sm_version == 7.5
+    if mem_gb < 4 or sm_version < 5.3:return cpu, torch.float32, 0.0, 0.0
+    if sm_version == 6.1 or is_16_series==True:return cuda, torch.float32, sm_version, mem_gb
+    if sm_version > 6.1:return cuda, torch.float16, sm_version, mem_gb
     return cpu, torch.float32, 0.0, 0.0
 
 

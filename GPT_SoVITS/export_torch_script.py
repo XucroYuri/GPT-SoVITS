@@ -37,12 +37,9 @@ default_config = {
 }
 
 sv_cn_model = None
-
-
 def init_sv_cn(device, is_half):
     global sv_cn_model
     sv_cn_model = SV(device, is_half)
-
 
 def load_sovits_new(sovits_path):
     f = open(sovits_path, "rb")
@@ -132,9 +129,7 @@ def sample(
 
 
 @torch.jit.script
-def spectrogram_torch(
-    hann_window: Tensor, y: Tensor, n_fft: int, sampling_rate: int, hop_size: int, win_size: int, center: bool = False
-):
+def spectrogram_torch(hann_window:Tensor, y: Tensor, n_fft: int, sampling_rate: int, hop_size: int, win_size: int, center: bool = False):
     # hann_window = torch.hann_window(win_size, device=y.device, dtype=y.dtype)
     y = torch.nn.functional.pad(
         y.unsqueeze(1),
@@ -261,21 +256,41 @@ class T2SBlock:
 
         attn = F.scaled_dot_product_attention(q, k, v, ~attn_mask)
 
-        # attn = attn.permute(2, 0, 1, 3).reshape(batch_size * q_len, self.hidden_dim)
-        # attn = attn.view(q_len, batch_size, self.hidden_dim).transpose(1, 0)
-        attn = attn.transpose(1, 2).reshape(batch_size, q_len, -1)
+        attn = attn.permute(2, 0, 1, 3).reshape(batch_size * q_len, self.hidden_dim)
+        attn = attn.view(q_len, batch_size, self.hidden_dim).transpose(1, 0)
         attn = F.linear(self.to_mask(attn, padding_mask), self.out_w, self.out_b)
 
-        x = x + attn
-        x = F.layer_norm(x, [self.hidden_dim], self.norm_w1, self.norm_b1, self.norm_eps1)
-        x = x + self.mlp.forward(x)
-        x = F.layer_norm(
-            x,
-            [self.hidden_dim],
-            self.norm_w2,
-            self.norm_b2,
-            self.norm_eps2,
-        )
+        if padding_mask is not None:
+            for i in range(batch_size):
+                # mask = padding_mask[i,:,0]
+                if self.false.device != padding_mask.device:
+                    self.false = self.false.to(padding_mask.device)
+                idx = torch.where(padding_mask[i, :, 0] == self.false)[0]
+                x_item = x[i, idx, :].unsqueeze(0)
+                attn_item = attn[i, idx, :].unsqueeze(0)
+                x_item = x_item + attn_item
+                x_item = F.layer_norm(x_item, [self.hidden_dim], self.norm_w1, self.norm_b1, self.norm_eps1)
+                x_item = x_item + self.mlp.forward(x_item)
+                x_item = F.layer_norm(
+                    x_item,
+                    [self.hidden_dim],
+                    self.norm_w2,
+                    self.norm_b2,
+                    self.norm_eps2,
+                )
+                x[i, idx, :] = x_item.squeeze(0)
+            x = self.to_mask(x, padding_mask)
+        else:
+            x = x + attn
+            x = F.layer_norm(x, [self.hidden_dim], self.norm_w1, self.norm_b1, self.norm_eps1)
+            x = x + self.mlp.forward(x)
+            x = F.layer_norm(
+                x,
+                [self.hidden_dim],
+                self.norm_w2,
+                self.norm_b2,
+                self.norm_eps2,
+            )
         return x, k_cache, v_cache
 
     def decode_next_token(self, x: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor):
@@ -365,9 +380,8 @@ class VitsModel(nn.Module):
             self.vq_model = self.vq_model.half()
         self.vq_model = self.vq_model.to(device)
         self.vq_model.eval()
-        self.hann_window = torch.hann_window(
-            self.hps.data.win_length, device=device, dtype=torch.float16 if is_half else torch.float32
-        )
+        self.hann_window = torch.hann_window(self.hps.data.win_length, device=device, dtype= torch.float16 if is_half else torch.float32)
+
 
     def forward(self, text_seq, pred_semantic, ref_audio, speed=1.0, sv_emb=None):
         refer = spectrogram_torch(
@@ -454,10 +468,6 @@ class T2SModel(nn.Module):
         bert = bert.unsqueeze(0)
 
         x = self.ar_text_embedding(all_phoneme_ids)
-
-        # avoid dtype inconsistency when exporting
-        bert = bert.to(dtype=self.bert_proj.weight.dtype)
-        
         x = x + self.bert_proj(bert.transpose(1, 2))
         x: torch.Tensor = self.ar_text_position(x)
 
@@ -657,9 +667,7 @@ def export(gpt_path, vits_path, ref_audio_path, ref_text, output_path, export_be
     ref_seq = torch.LongTensor([ref_seq_id]).to(device)
     ref_bert = ref_bert_T.T.to(ref_seq.device)
     text_seq_id, text_bert_T, norm_text = get_phones_and_bert(
-        "这是一个简单的示例，真没想到这么简单就完成了。The King and His Stories.Once there was a king. He likes to write stories, but his stories were not good. As people were afraid of him, they all said his stories were good.After reading them, the writer at once turned to the soldiers and said: Take me back to prison, please.",
-        "auto",
-        "v2",
+        "这是一个简单的示例，真没想到这么简单就完成了。The King and His Stories.Once there was a king. He likes to write stories, but his stories were not good. As people were afraid of him, they all said his stories were good.After reading them, the writer at once turned to the soldiers and said: Take me back to prison, please.", "auto", "v2"
     )
     text_seq = torch.LongTensor([text_seq_id]).to(device)
     text_bert = text_bert_T.T.to(text_seq.device)
@@ -667,7 +675,7 @@ def export(gpt_path, vits_path, ref_audio_path, ref_text, output_path, export_be
     ssl_content = ssl(ref_audio).to(device)
 
     # vits_path = "SoVITS_weights_v2/xw_e8_s216.pth"
-    vits = VitsModel(vits_path, device=device, is_half=False)
+    vits = VitsModel(vits_path,device=device,is_half=False)
     vits.eval()
 
     # gpt_path = "GPT_weights_v2/xw-e15.ckpt"
@@ -718,7 +726,7 @@ def export_prov2(
     is_half=True,
 ):
     if sv_cn_model == None:
-        init_sv_cn(device, is_half)
+        init_sv_cn(device,is_half)
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -739,7 +747,9 @@ def export_prov2(
 
     print(f"device: {device}")
 
-    ref_seq_id, ref_bert_T, ref_norm_text = get_phones_and_bert(ref_text, "all_zh", "v2")
+    ref_seq_id, ref_bert_T, ref_norm_text = get_phones_and_bert(
+        ref_text, "all_zh", "v2"
+    )
     ref_seq = torch.LongTensor([ref_seq_id]).to(device)
     ref_bert = ref_bert_T.T
     if is_half:
@@ -747,9 +757,7 @@ def export_prov2(
     ref_bert = ref_bert.to(ref_seq.device)
 
     text_seq_id, text_bert_T, norm_text = get_phones_and_bert(
-        "这是一个简单的示例，真没想到这么简单就完成了。The King and His Stories.Once there was a king. He likes to write stories, but his stories were not good. As people were afraid of him, they all said his stories were good.After reading them, the writer at once turned to the soldiers and said: Take me back to prison, please.",
-        "auto",
-        "v2",
+        "这是一个简单的示例，真没想到这么简单就完成了。The King and His Stories.Once there was a king. He likes to write stories, but his stories were not good. As people were afraid of him, they all said his stories were good.After reading them, the writer at once turned to the soldiers and said: Take me back to prison, please.", "auto", "v2"
     )
     text_seq = torch.LongTensor([text_seq_id]).to(device)
     text_bert = text_bert_T.T
@@ -765,7 +773,7 @@ def export_prov2(
     sv_model = ExportERes2NetV2(sv_cn_model)
 
     # vits_path = "SoVITS_weights_v2/xw_e8_s216.pth"
-    vits = VitsModel(vits_path, version, is_half=is_half, device=device)
+    vits = VitsModel(vits_path, version,is_half=is_half,device=device)
     vits.eval()
 
     # gpt_path = "GPT_weights_v2/xw-e15.ckpt"
@@ -863,7 +871,7 @@ class GPT_SoVITS(nn.Module):
 
 
 class ExportERes2NetV2(nn.Module):
-    def __init__(self, sv_cn_model: SV):
+    def __init__(self, sv_cn_model:SV):
         super(ExportERes2NetV2, self).__init__()
         self.bn1 = sv_cn_model.embedding_model.bn1
         self.conv1 = sv_cn_model.embedding_model.conv1
@@ -890,11 +898,11 @@ class ExportERes2NetV2(nn.Module):
         out4 = self.layer4(out3)
         out3_ds = self.layer3_ds(out3)
         fuse_out34 = self.fuse34(out4, out3_ds)
-        return fuse_out34.flatten(start_dim=1, end_dim=2).mean(-1)
+        return fuse_out34.flatten(start_dim=1,end_dim=2).mean(-1)
 
 
 class GPT_SoVITS_V2Pro(nn.Module):
-    def __init__(self, t2s: T2SModel, vits: VitsModel, sv_model: ExportERes2NetV2):
+    def __init__(self, t2s: T2SModel, vits: VitsModel,sv_model:ExportERes2NetV2):
         super().__init__()
         self.t2s = t2s
         self.vits = vits
@@ -921,7 +929,6 @@ class GPT_SoVITS_V2Pro(nn.Module):
         pred_semantic = self.t2s(prompts, ref_seq, text_seq, ref_bert, text_bert, top_k)
         audio = self.vits(text_seq, pred_semantic, ref_audio_sr, speed, sv_emb)
         return audio
-
 
 def test():
     parser = argparse.ArgumentParser(description="GPT-SoVITS Command Line Tool")
@@ -1039,14 +1046,24 @@ def export_symbel(version="v2"):
 def main():
     parser = argparse.ArgumentParser(description="GPT-SoVITS Command Line Tool")
     parser.add_argument("--gpt_model", required=True, help="Path to the GPT model file")
-    parser.add_argument("--sovits_model", required=True, help="Path to the SoVITS model file")
-    parser.add_argument("--ref_audio", required=True, help="Path to the reference audio file")
-    parser.add_argument("--ref_text", required=True, help="Path to the reference text file")
-    parser.add_argument("--output_path", required=True, help="Path to the output directory")
-    parser.add_argument("--export_common_model", action="store_true", help="Export Bert and SSL model")
+    parser.add_argument(
+        "--sovits_model", required=True, help="Path to the SoVITS model file"
+    )
+    parser.add_argument(
+        "--ref_audio", required=True, help="Path to the reference audio file"
+    )
+    parser.add_argument(
+        "--ref_text", required=True, help="Path to the reference text file"
+    )
+    parser.add_argument(
+        "--output_path", required=True, help="Path to the output directory"
+    )
+    parser.add_argument(
+        "--export_common_model", action="store_true", help="Export Bert and SSL model"
+    )
     parser.add_argument("--device", help="Device to use")
     parser.add_argument("--version", help="version of the model", default="v2")
-    parser.add_argument("--no-half", action="store_true", help="Do not use half precision for model weights")
+    parser.add_argument("--no-half", action="store_true", help = "Do not use half precision for model weights")
 
     args = parser.parse_args()
     if args.version in ["v2Pro", "v2ProPlus"]:

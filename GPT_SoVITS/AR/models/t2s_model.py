@@ -356,7 +356,7 @@ class Text2SemanticDecoder(nn.Module):
         x = self.ar_text_embedding(x)
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
         x = self.ar_text_position(x)
-        x_mask = make_pad_mask_left(x_lens)
+        x_mask = make_pad_mask(x_lens)
 
         y_mask = make_pad_mask(y_lens)
         y_mask_int = y_mask.type(torch.int64)
@@ -420,7 +420,7 @@ class Text2SemanticDecoder(nn.Module):
             mask=xy_attn_mask,
         )
         x_len = x_lens.max()
-        logits = self.ar_predict_layer(xy_dec[:, x_len-1:])
+        logits = self.ar_predict_layer(xy_dec[:, x_len:])
 
         ###### DPO #############
         reject_xy_pos, reject_xy_attn_mask, reject_targets = self.make_input_data(
@@ -432,7 +432,7 @@ class Text2SemanticDecoder(nn.Module):
             mask=reject_xy_attn_mask,
         )
         x_len = x_lens.max()
-        reject_logits = self.ar_predict_layer(reject_xy_dec[:, x_len-1:])
+        reject_logits = self.ar_predict_layer(reject_xy_dec[:, x_len:])
 
         # loss
         # from feiteng: 每次 duration 越多, 梯度更新也应该更多, 所以用 sum
@@ -455,7 +455,7 @@ class Text2SemanticDecoder(nn.Module):
         x = self.ar_text_embedding(x)
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
         x = self.ar_text_position(x)
-        x_mask = make_pad_mask_left(x_lens)
+        x_mask = make_pad_mask(x_lens)
 
         y_mask = make_pad_mask(y_lens)
         y_mask_int = y_mask.type(torch.int64)
@@ -502,7 +502,7 @@ class Text2SemanticDecoder(nn.Module):
             (xy_pos, None),
             mask=xy_attn_mask,
         )
-        logits = self.ar_predict_layer(xy_dec[:, x_len-1:]).permute(0, 2, 1)
+        logits = self.ar_predict_layer(xy_dec[:, x_len:]).permute(0, 2, 1)
         # loss
         # from feiteng: 每次 duration 越多, 梯度更新也应该更多, 所以用 sum
         loss = F.cross_entropy(logits, targets, reduction="sum")
@@ -578,7 +578,7 @@ class Text2SemanticDecoder(nn.Module):
     def pad_y_eos(self, y, y_mask_int, eos_id):
         targets = F.pad(y, (0, 1), value=0) + eos_id * F.pad(y_mask_int, (0, 1), value=1)
         # 错位
-        return targets[:, :-1], targets
+        return targets[:, :-1], targets[:, 1:]
 
     def infer_panel_batch_infer(
         self,
@@ -707,11 +707,9 @@ class Text2SemanticDecoder(nn.Module):
 
             if idx == 0:
                 attn_mask = F.pad(attn_mask[:, :, -1].unsqueeze(-2), (0, 1), value=False)
+                logits = logits[:, :-1]
             else:
                 attn_mask = F.pad(attn_mask, (0, 1), value=False)
-
-            if idx < 11:  ###至少预测出10个token不然不给停止（0.4s）
-                logits = logits[:, :-1] 
 
             samples = sample(
                 logits, y, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, temperature=temperature
@@ -796,7 +794,7 @@ class Text2SemanticDecoder(nn.Module):
         y_list = []
         idx_list = []
         for i in range(len(x)):
-            y, idx = next(self.infer_panel_naive(
+            y, idx = self.infer_panel_naive(
                 x[i].unsqueeze(0),
                 x_lens[i],
                 prompts[i].unsqueeze(0) if prompts is not None else None,
@@ -807,7 +805,7 @@ class Text2SemanticDecoder(nn.Module):
                 temperature,
                 repetition_penalty,
                 **kwargs,
-            ))
+            )
             y_list.append(y[0])
             idx_list.append(idx)
 
@@ -824,15 +822,8 @@ class Text2SemanticDecoder(nn.Module):
         early_stop_num: int = -1,
         temperature: float = 1.0,
         repetition_penalty: float = 1.35,
-        streaming_mode: bool = False,
-        chunk_length: int = 24,
         **kwargs,
     ):
-        mute_emb_sim_matrix = kwargs.get("mute_emb_sim_matrix", None)
-        chunk_split_thershold = kwargs.get("chunk_split_thershold", 0.3)
-        check_token_num = 2
-
-
         x = self.ar_text_embedding(x)
         x = x + self.bert_proj(bert_feature.transpose(1, 2))
         x = self.ar_text_position(x)
@@ -884,10 +875,7 @@ class Text2SemanticDecoder(nn.Module):
             .to(device=x.device, dtype=torch.bool)
         )
 
-        token_counter = 0
-        curr_ptr = prefix_len
         for idx in tqdm(range(1500)):
-            token_counter+=1
             if xy_attn_mask is not None:
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(xy_pos, xy_attn_mask, None)
             else:
@@ -912,41 +900,12 @@ class Text2SemanticDecoder(nn.Module):
 
             if torch.argmax(logits, dim=-1)[0] == self.EOS or samples[0, 0] == self.EOS:
                 stop = True
-                y=y[:, :-1]
-                token_counter -= 1
-
-            if idx == 1499:
-                stop = True
-
             if stop:
                 if y.shape[1] == 0:
                     y = torch.concat([y, torch.zeros_like(samples)], dim=1)
                     print("bad zero prediction")
-                # print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
-                if streaming_mode:
-                    yield y[:, curr_ptr:] if curr_ptr<y.shape[1] else None, True
+                print(f"T2S Decoding EOS [{prefix_len} -> {y.shape[1]}]")
                 break
-
-
-            if streaming_mode and (mute_emb_sim_matrix is not None) and (token_counter >= chunk_length+check_token_num):
-                score = mute_emb_sim_matrix[y[0, curr_ptr:]] - chunk_split_thershold
-                score[score<0]=-1
-                score[:-1]=score[:-1]+score[1:] ##考虑连续两个token
-                argmax_idx = score.argmax()
-
-                if score[argmax_idx]>=0 and argmax_idx+1>=chunk_length: 
-                    print(f"\n\ncurr_ptr:{curr_ptr}")
-                    yield y[:, curr_ptr:], False
-                    token_counter -= argmax_idx+1
-                    curr_ptr += argmax_idx+1
-
-
-            elif streaming_mode and (mute_emb_sim_matrix is None) and (token_counter >= chunk_length):
-                yield y[:, -token_counter:], False
-                curr_ptr+=token_counter
-                token_counter = 0
-                
-
 
             ####################### update next step ###################################
             y_emb = self.ar_audio_embedding(y[:, -1:])
@@ -954,14 +913,9 @@ class Text2SemanticDecoder(nn.Module):
                 :, y_len + idx
             ].to(dtype=y_emb.dtype, device=y_emb.device)
 
-
-
-        if not streaming_mode:
-            if ref_free:
-                yield y, 0
-            yield y, idx
-
-
+        if ref_free:
+            return y[:, :-1], 0
+        return y[:, :-1], idx
 
     def infer_panel(
         self,
@@ -976,6 +930,6 @@ class Text2SemanticDecoder(nn.Module):
         repetition_penalty: float = 1.35,
         **kwargs,
     ):
-        return next(self.infer_panel_naive(
+        return self.infer_panel_naive(
             x, x_lens, prompts, bert_feature, top_k, top_p, early_stop_num, temperature, repetition_penalty, **kwargs
-        ))
+        )

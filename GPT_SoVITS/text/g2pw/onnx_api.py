@@ -340,13 +340,13 @@ class G2PWOnnxConverter(_G2PWBaseOnnxConverter):
             os.path.join(self.model_dir, "g2pw.onnx"),
         )
 
-        if "CUDAExecutionProvider" in onnxruntime.get_available_providers():
+        try:
             self.session_g2pw = onnxruntime.InferenceSession(
                 onnx_path,
                 sess_options=sess_options,
                 providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
             )
-        else:
+        except Exception:
             self.session_g2pw = onnxruntime.InferenceSession(
                 onnx_path,
                 sess_options=sess_options,

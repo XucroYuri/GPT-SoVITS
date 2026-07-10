@@ -90,6 +90,16 @@ conda activate GPTSoVits
 bash install.sh --device <CU126|CU128|ROCM|CPU> --source <HF|HF-Mirror|ModelScope> [--download-uvr5]
 ```
 
+### Project-local ASR model path
+
+By default, local ASR models are loaded from `tools/asr/models`. You can override only the ASR model root with:
+
+```bash
+export GPT_SOVITS_ASR_MODELS_DIR=/path/to/asr_models
+```
+
+The Windows portable launch scripts also set project-local `HF_HOME` and `TRANSFORMERS_CACHE` paths at startup.
+
 ### macOS
 
 **Note: The models trained with GPUs on Macs result in significantly lower quality compared to those trained on other devices, so we are temporarily using CPUs instead.**
@@ -222,6 +232,14 @@ vocal_path|speaker_name|language|text
 
 ```
 
+The ProPlus metadata workflow also accepts and writes this extended form:
+
+```
+vocal_path|speaker_name|language|text|emotion|remark
+```
+
+`emotion` and `remark` are label/inference metadata for reference-audio filtering, backfill, and review. Training preprocessing consumes only the first four fields.
+
 Language dictionary:
 
 - 'zh': Chinese
@@ -349,7 +367,7 @@ Use v4 from v1/v2/v3 environment:
 
 2. Clone the latest codes from github.
 
-3. Download v4 pretrained models (gsv-v4-pretrained/s2v4.pth, and gsv-v4-pretrained/vocoder.pth) from [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) and put them into `GPT_SoVITS/pretrained_models`.
+3. Download v4 pretrained models (gsv-v4-pretrained/s2Gv4.pth, and gsv-v4-pretrained/vocoder.pth) from [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) and put them into `GPT_SoVITS/pretrained_models`.
 
 ## V2Pro Release Notes
 
@@ -367,6 +385,13 @@ Use v2Pro from v1/v2/v3/v4 environment:
 2. Clone the latest codes from github.
 
 3. Download v2Pro pretrained models (v2Pro/s2Dv2Pro.pth, v2Pro/s2Gv2Pro.pth, v2Pro/s2Dv2ProPlus.pth, v2Pro/s2Gv2ProPlus.pth, and sv/pretrained_eres2netv2w24s4ep4.ckpt) from [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) and put them into `GPT_SoVITS/pretrained_models`.
+
+   The v2Pro series contains two compatible pretrained base model combinations:
+
+   | Version | GPT / semantic model | SoVITS-G model | SoVITS-D model | Speaker verification model |
+   | --- | --- | --- | --- | --- |
+   | v2Pro | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2Pro.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
+   | v2ProPlus | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
 
 ## Todo List
 

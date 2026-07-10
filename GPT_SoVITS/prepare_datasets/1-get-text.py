@@ -20,6 +20,7 @@ import os.path
 from text.cleaner import clean_text
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 from tools.my_utils import clean_path
+from tools.list_metadata import parse_list_line
 
 # inp_text=sys.argv[1]
 # inp_wav_dir=sys.argv[2]
@@ -126,13 +127,15 @@ if os.path.exists(txt_path) == False:
     }
     for line in lines[int(i_part) :: int(all_parts)]:
         try:
-            wav_name, spk_name, language, text = line.split("|")
-            # todo.append([name,text,"zh"])
+            item = parse_list_line(line)
+            if item is None:
+                raise ValueError("list行列数不足，需至少4列：wav_path|speaker_name|language|text")
+            wav_name, language, text = item.wav_path, item.language, item.text
             if language in language_v1_to_language_v2.keys():
                 todo.append([wav_name, text, language_v1_to_language_v2.get(language, language)])
             else:
                 print(f"\033[33m[Waring] The {language = } of {wav_name} is not supported for training.\033[0m")
-        except:
+        except Exception:
             print(line, traceback.format_exc())
 
     process(todo, res)

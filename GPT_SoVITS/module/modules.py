@@ -1,4 +1,5 @@
 import math
+import pdb
 
 import numpy as np
 import torch
@@ -719,10 +720,10 @@ class MelStyleEncoder(nn.Module):
         else:
             len_ = (~mask).sum(dim=1).unsqueeze(1)
             x = x.masked_fill(mask.unsqueeze(-1), 0)
-            dtype = x.dtype
+            dtype=x.dtype
             x = x.float()
-            x = torch.div(x, len_.unsqueeze(1))
-            out = x.sum(dim=1).to(dtype)
+            x=torch.div(x,len_.unsqueeze(1))
+            out=x.sum(dim=1).to(dtype)
         return out
 
     def forward(self, x, mask=None):

@@ -210,6 +210,14 @@ docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GP
 vocal_path|speaker_name|language|text
 ```
 
+ProPlus 元数据流程同时兼容并可写入扩展格式:
+
+```
+vocal_path|speaker_name|language|text|emotion|remark
+```
+
+`emotion` 和 `remark` 仅用于标注管理、参考音频筛选、推理回填和复核；训练预处理只消费前 4 列。
+
 语言字典:
 
 - 'zh': 中文
@@ -353,6 +361,13 @@ python webui.py
 2. 从 GitHub 克隆最新代码.
 
 3. 从 [huggingface](https://huggingface.co/lj1995/GPT-SoVITS/tree/main) 下载 V2Pro 预训练模型 (`v2Pro/s2Dv2Pro.pth`, `v2Pro/s2Gv2Pro.pth`, `v2Pro/s2Dv2ProPlus.pth`, `v2Pro/s2Gv2ProPlus.pth`, 和 `sv/pretrained_eres2netv2w24s4ep4.ckpt`), 并放入 `GPT_SoVITS/pretrained_models` 目录.
+
+   V2Pro 系列包含两套兼容的训练底模组合:
+
+   | 版本 | GPT / semantic 模型 | SoVITS-G 模型 | SoVITS-D 模型 | 说话人验证模型 |
+   | --- | --- | --- | --- | --- |
+   | v2Pro | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2Pro.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2Pro.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
+   | v2ProPlus | `GPT_SoVITS/pretrained_models/s1v3.ckpt` | `GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/v2Pro/s2Dv2ProPlus.pth` | `GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt` |
 
 ## 待办事项清单
 
