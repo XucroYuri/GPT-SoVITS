@@ -4,6 +4,9 @@ __pycache__
 *.pyc
 env
 runtime
+/artifacts/portable/
+/data/local/
+/data/cache/portable/
 py312/
 .idea
 output
