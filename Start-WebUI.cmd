@@ -1,3 +1,3 @@
 @echo off
-call "%~dp0go-webui.bat" %*
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0tts_more\Start-WebUI.ps1" %*
 exit /b %errorlevel%
