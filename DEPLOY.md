@@ -18,10 +18,10 @@ deploy.bat
 
 NVIDIA 显卡兼容性:
 
-- 全新安装模式会调用 `nvidia-smi` 检测显卡名称和 Compute Capability。
+- 全新安装模式通过 Windows CIM 检测显卡名称；安装后的最终 CUDA 能力由包内 PyTorch 探针确认。
 - 检测到 RTX 50 系、Blackwell 或 SM 12.x GPU 时，脚本会阻止选择 `CU126`，要求使用 `CU128` 或显式选择 `CPU`。
 - 软链接/复制模式如果复用了 `runtime`、`py312` 或 `.venv`，脚本会读取该环境的 `torch.version.cuda`；在 RTX 50/Blackwell 上低于 12.8 会中止并提示改用 `CU128` 环境。
-- 如果 `nvidia-smi` 显示驱动支持的 CUDA 版本低于 12.8，脚本会提示先升级 NVIDIA 驱动。
+- 如果安装后包内 PyTorch 探针不满足所选 CUDA 配置，脚本会失败并提示修复运行时或驱动，不会静默回退到 CPU。
 
 部署后启动:
 

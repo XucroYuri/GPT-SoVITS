@@ -510,9 +510,11 @@ function Test-BlackwellComputeCapability {
     return $null -ne $version -and $version.Major -ge 12
 }
 
-function Get-NvidiaGpuInfo {
-    $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-    if ($null -eq $nvidiaSmi) {
+function Get-WindowsNvidiaGpuInfo {
+    $controllers = @()
+    try {
+        $controllers = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+    } catch {
         return [PSCustomObject]@{
             Available = $false
             Gpus = @()
@@ -520,42 +522,22 @@ function Get-NvidiaGpuInfo {
         }
     }
 
-    $gpus = @()
-    $queryOutput = & $nvidiaSmi.Source --query-gpu=name,compute_cap --format=csv,noheader 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        foreach ($line in $queryOutput) {
-            if ([string]::IsNullOrWhiteSpace($line)) {
-                continue
-            }
-            $parts = $line -split ",", 2
-            $name = $parts[0].Trim()
-            $compute = ""
-            if ($parts.Count -gt 1) {
-                $compute = $parts[1].Trim()
-            }
-            $gpus += [PSCustomObject]@{ Name = $name; ComputeCapability = $compute }
+    $gpus = @($controllers | Where-Object {
+        ([string]$_.AdapterCompatibility -match "(?i)NVIDIA") -or
+        ([string]$_.Name -match "(?i)NVIDIA") -or
+        ([string]$_.PNPDeviceID -match "(?i)VEN_10DE")
+    } | ForEach-Object {
+        [PSCustomObject]@{
+            Name = ([string]$_.Name).Trim()
+            ComputeCapability = ""
+            DriverVersion = ([string]$_.DriverVersion).Trim()
         }
-    } else {
-        $nameOutput = & $nvidiaSmi.Source --query-gpu=name --format=csv,noheader 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            foreach ($line in $nameOutput) {
-                if (-not [string]::IsNullOrWhiteSpace($line)) {
-                    $gpus += [PSCustomObject]@{ Name = $line.Trim(); ComputeCapability = "" }
-                }
-            }
-        }
-    }
-
-    $plainOutput = (& $nvidiaSmi.Source 2>$null) -join "`n"
-    $driverCudaVersion = $null
-    if ($plainOutput -match "CUDA Version:\s*([0-9]+(?:\.[0-9]+)?)") {
-        $driverCudaVersion = $Matches[1]
-    }
+    })
 
     return [PSCustomObject]@{
-        Available = $true
+        Available = @($gpus).Count -gt 0
         Gpus = @($gpus)
-        DriverCudaVersion = $driverCudaVersion
+        DriverCudaVersion = $null
     }
 }
 
@@ -594,7 +576,7 @@ function Get-TorchCudaVersion {
 function Assert-GpuPackageCompatible {
     param(
         [Parameter(Mandatory = $true)][string]$SelectedDevice,
-        $GpuInfo = (Get-NvidiaGpuInfo)
+        $GpuInfo = (Get-WindowsNvidiaGpuInfo)
     )
 
     if ($SelectedDevice -eq "CPU") {
@@ -602,7 +584,7 @@ function Assert-GpuPackageCompatible {
     }
 
     if (-not $GpuInfo.Available -or @($GpuInfo.Gpus).Count -eq 0) {
-        Write-Warn "未检测到 nvidia-smi 输出，无法自动校验 NVIDIA 代际兼容性。"
+        Write-Warn "未通过 Windows 显卡信息检测到 NVIDIA GPU，无法自动校验 NVIDIA 代际兼容性。"
         return
     }
 
@@ -622,7 +604,7 @@ function Assert-GpuPackageCompatible {
 
         $driverCuda = Convert-VersionText $GpuInfo.DriverCudaVersion
         if ($null -ne $driverCuda -and $driverCuda -lt ([version]"12.8")) {
-            Write-Warn "nvidia-smi 显示驱动支持的 CUDA 版本为 $($GpuInfo.DriverCudaVersion)，低于 12.8。RTX 50/Blackwell 建议先升级 NVIDIA 驱动。"
+            Write-Warn "已检测到的驱动 CUDA 能力为 $($GpuInfo.DriverCudaVersion)，低于 12.8。RTX 50/Blackwell 建议先升级 NVIDIA 驱动。"
         }
 
         if ($SelectedDevice -eq "CU128") {
@@ -634,7 +616,7 @@ function Assert-GpuPackageCompatible {
 function Assert-ReusedPythonGpuCompatible {
     param(
         [string]$PythonPath,
-        $GpuInfo = (Get-NvidiaGpuInfo)
+        $GpuInfo = (Get-WindowsNvidiaGpuInfo)
     )
 
     if ([string]::IsNullOrWhiteSpace($PythonPath)) {
@@ -684,6 +666,27 @@ function Invoke-CheckedCommand {
     if ($LASTEXITCODE -ne 0) {
         throw "命令失败，退出码: $LASTEXITCODE"
     }
+}
+
+function Assert-InstalledTorchDeviceCompatible {
+    param(
+        [Parameter(Mandatory = $true)][string]$EnvName,
+        [Parameter(Mandatory = $true)][ValidateSet("CU126", "CU128", "CPU")][string]$SelectedDevice
+    )
+
+    $expectedCuda = switch ($SelectedDevice) {
+        "CU128" { "12.8" }
+        "CU126" { "12.6" }
+        "CPU" { $null }
+    }
+    if ($SelectedDevice -eq "CPU") {
+        $code = "import torch; assert torch.version.cuda is None, f'expected CPU-only Torch, got CUDA {torch.version.cuda}'; print('Torch CPU probe OK')"
+    } else {
+        $code = "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; runtime = str(torch.version.cuda or ''); assert runtime.startswith('$expectedCuda'), f'expected CUDA $expectedCuda, got {runtime}'; print(torch.cuda.get_device_name(0))"
+    }
+
+    Invoke-CheckedCommand -FilePath "conda" -Arguments @("run", "-n", $EnvName, "python", "-c", $code)
+    Write-Ok "安装后 PyTorch $SelectedDevice 探针通过。"
 }
 
 function New-DeployEnvBatch {
@@ -754,6 +757,7 @@ function Invoke-FreshInstall {
     }
 
     Invoke-CheckedCommand -FilePath "conda" -Arguments $installArgs
+    Assert-InstalledTorchDeviceCompatible -EnvName $CondaEnvName -SelectedDevice $Device
     Initialize-LocalDirectories
     New-DeployEnvBatch -EnvName $CondaEnvName
     Write-Ok "全新安装完成，启动脚本将使用 conda 环境: $CondaEnvName"
