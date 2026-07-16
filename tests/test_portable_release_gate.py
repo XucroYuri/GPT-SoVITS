@@ -137,6 +137,31 @@ class PortableReleaseGateTests(unittest.TestCase):
         )
         self.assertNotIn("pip install jsonschema", workflow)
 
+    def test_release_workflow_checks_root_full_refusal_as_child_process(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "portable-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "$fullProbePowerShell = (Get-Process -Id $PID).Path", workflow
+        )
+        self.assertIn(
+            "Start-Process -FilePath $fullProbePowerShell", workflow
+        )
+        self.assertIn(
+            "-RedirectStandardOutput $fullProbeStdout", workflow
+        )
+        self.assertIn(
+            "-RedirectStandardError $fullProbeStderr", workflow
+        )
+        self.assertIn(
+            "$fullProbeExitCode = $fullProbeProcess.ExitCode",
+            workflow,
+        )
+        self.assertIn("if ($fullProbeExitCode -eq 0)", workflow)
+        self.assertIn('$fullProbeText -notmatch "profile=full"', workflow)
+        self.assertNotIn("$blocked = $false", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

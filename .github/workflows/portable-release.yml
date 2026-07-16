@@ -62,9 +62,29 @@ jobs:
           }
           & $buildPython tts_more\portable_packages.py audit-release-assets --directory artifacts\portable\bootstrap --expected-component gpt-sovits --expected-version $version
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap release asset set or embedded package_profile audit failed" }
-          $blocked = $false
-          try { .\Build-Package.ps1 -Profile Full -Device CPU -Version $version } catch { $blocked = $_.Exception.Message -match "profile=full" }
-          if (!$blocked) { throw "Full profile was not blocked in GitHub Actions" }
+          $fullProbePowerShell = (Get-Process -Id $PID).Path
+          $fullProbeScript = (Resolve-Path -LiteralPath .\Build-Package.ps1).Path
+          $fullProbeTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+          $fullProbeId = [guid]::NewGuid().ToString("N")
+          $fullProbeStdout = Join-Path $fullProbeTemp "tts-more-full-probe-$fullProbeId.stdout.log"
+          $fullProbeStderr = Join-Path $fullProbeTemp "tts-more-full-probe-$fullProbeId.stderr.log"
+          $quotedFullProbeScript = '"' + $fullProbeScript.Replace('"', '""') + '"'
+          $fullProbeArguments = @(
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", $quotedFullProbeScript, "-Profile", "Full", "-Device", "CPU", "-Version", $version
+          )
+          try {
+            $fullProbeProcess = Start-Process -FilePath $fullProbePowerShell -ArgumentList $fullProbeArguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $fullProbeStdout -RedirectStandardError $fullProbeStderr
+            $fullProbeExitCode = $fullProbeProcess.ExitCode
+            $fullProbeText = @(
+              if (Test-Path -LiteralPath $fullProbeStdout) { Get-Content -LiteralPath $fullProbeStdout -Raw }
+              if (Test-Path -LiteralPath $fullProbeStderr) { Get-Content -LiteralPath $fullProbeStderr -Raw }
+            ) -join "`n"
+          } finally {
+            Remove-Item -LiteralPath $fullProbeStdout, $fullProbeStderr -Force -ErrorAction SilentlyContinue
+          }
+          if ($fullProbeExitCode -eq 0) { throw "Full profile unexpectedly succeeded in GitHub Actions" }
+          if ($fullProbeText -notmatch "profile=full") { throw "Full profile failed without the expected local-only refusal: $fullProbeText" }
       - uses: actions/upload-artifact@v7
         with:
           name: gpt-sovits-windows-bootstrap
