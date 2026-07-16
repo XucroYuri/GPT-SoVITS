@@ -21,6 +21,7 @@ jobs:
     runs-on: windows-latest
     env:
       PACKAGE_VERSION: ${{ inputs.version || github.ref_name }}
+      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\tts-more-build-tools
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,6 +29,13 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Install frozen uv tool
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+      - name: Sync locked portable build tools
+        shell: pwsh
+        run: uv sync --locked --project tts_more/build-tools
       - name: Verify one-click portable contract
         shell: pwsh
         run: |
@@ -39,19 +47,20 @@ jobs:
           if (-not (Test-Path -LiteralPath '使用说明-先看这里.txt' -PathType Leaf)) { throw 'portable root guide is missing' }
       - name: Build and audit Bootstrap; prove Full is prohibited
         shell: pwsh
-        env:
-          TTS_MORE_BUILD_PYTHON: python
         run: |
+          $buildPython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts\python.exe"
+          if (-not (Test-Path -LiteralPath $buildPython -PathType Leaf)) { throw "locked portable build Python is missing" }
+          $env:TTS_MORE_BUILD_PYTHON = $buildPython
           $version = $env:PACKAGE_VERSION -replace '^v', ''
           $version = $version -replace '[^0-9A-Za-z._-]', '-'
           .\Build-Package.ps1 -Profile Bootstrap -Device CPU -Version $version
           $candidateZips = @(Get-ChildItem artifacts\portable\bootstrap\*.zip)
           if ($candidateZips.Count -ne 1) { throw "expected exactly one Bootstrap ZIP" }
           foreach ($candidateZip in $candidateZips) {
-            python tts_more\portable_packages.py audit-release --zip $candidateZip.FullName
+            & $buildPython tts_more\portable_packages.py audit-release --zip $candidateZip.FullName
             if ($LASTEXITCODE -ne 0) { throw "Bootstrap ZIP release audit failed" }
           }
-          python tts_more\portable_packages.py audit-release-assets --directory artifacts\portable\bootstrap --expected-component gpt-sovits --expected-version $version
+          & $buildPython tts_more\portable_packages.py audit-release-assets --directory artifacts\portable\bootstrap --expected-component gpt-sovits --expected-version $version
           if ($LASTEXITCODE -ne 0) { throw "Bootstrap release asset set or embedded package_profile audit failed" }
           $blocked = $false
           try { .\Build-Package.ps1 -Profile Full -Device CPU -Version $version } catch { $blocked = $_.Exception.Message -match "profile=full" }
@@ -72,6 +81,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: bootstrap
     runs-on: ubuntu-latest
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/tts-more-build-tools
     permissions:
       contents: write
     steps:
@@ -79,6 +90,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Install frozen uv tool
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+      - name: Sync locked portable build tools
+        run: uv sync --locked --project tts_more/build-tools
       - uses: actions/download-artifact@v8
         with:
           name: gpt-sovits-windows-bootstrap
@@ -87,18 +104,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          build_python="$UV_PROJECT_ENVIRONMENT/bin/python"
+          if [ ! -x "$build_python" ]; then
+            echo "locked portable build Python is missing" >&2
+            exit 1
+          fi
           version="${GITHUB_REF_NAME#v}"
           found_zip=false
           for candidate_zip in release-assets/*.zip; do
             [ -e "$candidate_zip" ] || continue
             found_zip=true
-            python tts_more/portable_packages.py audit-release --zip "$candidate_zip"
+            "$build_python" tts_more/portable_packages.py audit-release --zip "$candidate_zip"
           done
           if [ "$found_zip" != true ]; then
             echo "no Bootstrap ZIP was downloaded" >&2
             exit 1
           fi
-          python tts_more/portable_packages.py audit-release-assets --directory release-assets --expected-component gpt-sovits --expected-version "$version"
+          "$build_python" tts_more/portable_packages.py audit-release-assets --directory release-assets --expected-component gpt-sovits --expected-version "$version"
           shopt -s nullglob
           assets=(
             release-assets/*.zip
@@ -138,7 +160,7 @@ jobs:
           for asset_name in "${local_asset_names[@]}"; do
             verify_asset_args+=(--expected-name "$asset_name")
           done
-          python tts_more/verify-release-asset-set.py \
+          "$build_python" tts_more/verify-release-asset-set.py \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
             "${verify_asset_args[@]}"

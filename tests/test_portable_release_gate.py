@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import re
 import subprocess
 import unittest
 from contextlib import redirect_stderr
@@ -96,7 +97,7 @@ class PortableReleaseGateTests(unittest.TestCase):
         )
         publish = workflow.split("- name: Publish bootstrap assets only", 1)[1]
         upload = 'gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber'
-        gate_call = "python tts_more/verify-release-asset-set.py"
+        gate_call = '"$build_python" tts_more/verify-release-asset-set.py'
 
         self.assertIn("audit-release-assets --directory", workflow)
         self.assertIn("comm -23", publish)
@@ -105,6 +106,36 @@ class PortableReleaseGateTests(unittest.TestCase):
         self.assertLess(publish.index(upload), publish.index(gate_call))
         self.assertIn('verify_asset_args+=(--expected-name "$asset_name")', publish)
         self.assertNotIn("release delete-asset", publish)
+
+    def test_release_workflow_uses_locked_portable_build_tools(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "portable-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b",
+            workflow,
+        )
+        self.assertEqual(2, workflow.count("uv sync --locked --project tts_more/build-tools"))
+        self.assertIn(
+            "UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\\tts-more-build-tools", workflow
+        )
+        self.assertIn(
+            "UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/tts-more-build-tools", workflow
+        )
+        self.assertIn(
+            "$buildPython = Join-Path $env:UV_PROJECT_ENVIRONMENT \"Scripts\\python.exe\"",
+            workflow,
+        )
+        self.assertIn("$env:TTS_MORE_BUILD_PYTHON = $buildPython", workflow)
+        self.assertIn("build_python=\"$UV_PROJECT_ENVIRONMENT/bin/python\"", workflow)
+        self.assertNotRegex(
+            workflow,
+            re.compile(
+                r"(?m)^\s*python\s+tts_more[\\/](?:portable_packages|verify-release-asset-set)\.py"
+            ),
+        )
+        self.assertNotIn("pip install jsonschema", workflow)
 
 
 if __name__ == "__main__":
