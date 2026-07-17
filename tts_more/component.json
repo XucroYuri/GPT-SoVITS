@@ -3,7 +3,7 @@
   "component": "gpt-sovits",
   "module": "tts_more_worker.gpt_sovits:app",
   "port": 9880,
-  "python": "3.11",
+  "python": "3.11.9",
   "upstream_repository": "https://github.com/XucroYuri/GPT-SoVITS.git",
   "branch": "main",
   "worker_module": "tts_more_worker.gpt_sovits:app",
