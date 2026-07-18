@@ -13,7 +13,8 @@ tqdm
 funasr>=1.3.7
 cn2an
 pypinyin
-pyopenjtalk>=0.4.1
+pyopenjtalk>=0.4.1; platform_system != "Windows"
+openjtalk==0.3.0.dev3; platform_system == "Windows"
 g2p_en
 torchaudio
 modelscope
@@ -23,7 +24,7 @@ peft<0.18.0
 chardet
 PyYAML
 psutil
-jieba_fast
+jieba_fast; platform_system != "Windows"
 jieba
 split-lang
 fast_langdetect>=0.3.1
