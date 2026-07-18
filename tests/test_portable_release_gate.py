@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import re
 import subprocess
 import unittest
@@ -45,6 +46,18 @@ def _arguments(expected: list[str]) -> list[str]:
 
 
 class PortableReleaseGateTests(unittest.TestCase):
+    def test_runtime_probe_adds_the_upstream_gpt_source_root(self) -> None:
+        runtime_lock = json.loads(
+            (ROOT / "tts_more" / "locks" / "runtime.lock.json").read_text(encoding="utf-8")
+        )
+        component = json.loads(
+            (ROOT / "tts_more" / "component.json").read_text(encoding="utf-8")
+        )
+
+        for probe in (runtime_lock["import_probe"], component["import_probe"]):
+            self.assertIn("pathlib.Path.cwd() / 'GPT_SoVITS'", probe)
+            self.assertLess(probe.index("sys.path.insert"), probe.index("from GPT_SoVITS"))
+
     def test_release_gate_accepts_exact_six_assets(self) -> None:
         gate = _load_gate()
         expected = _expected_names()
