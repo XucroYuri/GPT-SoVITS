@@ -130,11 +130,24 @@ class PortableReleaseGateTests(unittest.TestCase):
             workflow,
         )
         self.assertEqual(2, workflow.count("uv sync --locked --project tts_more/build-tools"))
-        self.assertIn(
-            "UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\\tts-more-build-tools", workflow
+        self.assertNotRegex(
+            workflow,
+            re.compile(
+                r"(?m)^    env:\n(?:      [^\n]*\n)*"
+                r"      UV_PROJECT_ENVIRONMENT:"
+            ),
         )
-        self.assertIn(
-            "UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/tts-more-build-tools", workflow
+        self.assertEqual(
+            2,
+            workflow.count(
+                "          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}\\tts-more-build-tools"
+            ),
+        )
+        self.assertEqual(
+            2,
+            workflow.count(
+                "          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/tts-more-build-tools"
+            ),
         )
         self.assertIn(
             "$buildPython = Join-Path $env:UV_PROJECT_ENVIRONMENT \"Scripts\\python.exe\"",
