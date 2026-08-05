@@ -199,3 +199,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Tool state (not project artifacts)
+.omc/
+.claude/
+!.claude/settings.json
